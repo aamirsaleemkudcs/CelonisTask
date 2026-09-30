@@ -5,9 +5,21 @@ pool:
   name: Azure Pipelines
   vmImage: ubuntu-latest
 
+# Azure DevOps Library Variable Group
+variables:
+- group: AWS
+
 steps:
+
 - script: |
-    echo "Hello Aamir"
     echo "Azure DevOps pipeline is working"
-    uname -a
   displayName: "Test Pipeline"
+
+
+- script: |
+    aws sts get-caller-identity
+  displayName: "Test AWS Connection"
+  env:
+    AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+    AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+    AWS_DEFAULT_REGION: $(AWS_REGION)
