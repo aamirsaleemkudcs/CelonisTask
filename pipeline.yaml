@@ -77,14 +77,3 @@ steps:
     AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
     AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
     AWS_DEFAULT_REGION: $(AWS_REGION)
-
-
-# Verify new S3 bucket
-- script: |
-    aws s3api head-bucket --bucket celonis-tfstate-dev
-    echo "celonis-tfstate-dev successfully created"
-  displayName: "Verify S3 Bucket"
-  env:
-    AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
-    AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
-    AWS_DEFAULT_REGION: $(AWS_REGION)
