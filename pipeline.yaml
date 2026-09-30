@@ -5,20 +5,86 @@ pool:
   name: Azure Pipelines
   vmImage: ubuntu-latest
 
-# Azure DevOps Library Variable Group
 variables:
 - group: AWS
 
 steps:
 
+- checkout: self
+
+
+# Test Pipeline
 - script: |
     echo "Azure DevOps pipeline is working"
   displayName: "Test Pipeline"
 
 
+# Test AWS Connection
 - script: |
     aws sts get-caller-identity
   displayName: "Test AWS Connection"
+  env:
+    AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+    AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+    AWS_DEFAULT_REGION: $(AWS_REGION)
+
+
+# Install Terraform
+- script: |
+    wget -q https://releases.hashicorp.com/terraform/1.13.3/terraform_1.13.3_linux_amd64.zip
+    unzip -o terraform_1.13.3_linux_amd64.zip
+    sudo mv terraform /usr/local/bin/terraform
+    terraform version
+  displayName: "Install Terraform"
+
+
+# Terraform Format
+- script: |
+    terraform fmt -check -recursive
+  displayName: "Terraform Format Check"
+
+
+# Terraform Init
+- script: |
+    terraform init
+  displayName: "Terraform Init"
+  env:
+    AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+    AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+    AWS_DEFAULT_REGION: $(AWS_REGION)
+
+
+# Terraform Validate
+- script: |
+    terraform validate
+  displayName: "Terraform Validate"
+
+
+# Terraform Plan
+- script: |
+    terraform plan -out=tfplan
+  displayName: "Terraform Plan"
+  env:
+    AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+    AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+    AWS_DEFAULT_REGION: $(AWS_REGION)
+
+
+# Terraform Apply
+- script: |
+    terraform apply -auto-approve tfplan
+  displayName: "Terraform Apply - Create S3 Bucket"
+  env:
+    AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+    AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+    AWS_DEFAULT_REGION: $(AWS_REGION)
+
+
+# Verify new S3 bucket
+- script: |
+    aws s3api head-bucket --bucket celonis-tfstate-dev
+    echo "celonis-tfstate-dev successfully created"
+  displayName: "Verify S3 Bucket"
   env:
     AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
     AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
