@@ -3,7 +3,7 @@
 # ==================================
 
 module "s3_dev" {
-  source = "./TF_Modules/S3_Backends"
+  source = "./TF_Modules/S3"
 
   bucket_name = "celonis-tfstate-dev"
   environment = "dev"
