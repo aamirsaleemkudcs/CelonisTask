@@ -9,12 +9,12 @@ terraform {
   }
 }
 
-provider "aws" {
-  region = "us-east-2"
-}
-
 variable "aws_region" {
-  description = "AWS Region"
+  description = "AWS region where resources will be deployed"
   type        = string
   default     = "us-east-2"
+}
+
+provider "aws" {
+  region = var.aws_region
 }
