@@ -34,7 +34,7 @@ module "vpc" {
   availability_zone_2 = "us-east-2b"
 }
 
-
+/*
 # ==================================
 # EKS Module
 # ==================================
@@ -85,4 +85,4 @@ module "rds" {
   db_username = "sonaradmin"
 
   multi_az = false
-}
+}*/
