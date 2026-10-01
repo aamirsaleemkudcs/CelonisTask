@@ -8,326 +8,419 @@ pool:
 variables:
 - group: AWS
 
-steps:
 
-# ==========================================
-# Checkout Repository
-# ==========================================
-- checkout: self
+# ============================================================
+# STAGE 1 - INFRASTRUCTURE
+# ============================================================
 
+stages:
 
-# ==========================================
-# Test Pipeline
-# ==========================================
-- script: |
-    echo "Azure DevOps pipeline is working"
-  displayName: "Test Pipeline"
+- stage: Infrastructure
+  displayName: "Stage 1 - Infrastructure"
 
+  jobs:
 
-# ==========================================
-# Test AWS Connection
-# ==========================================
-- script: |
-    echo "Testing AWS connection..."
-    aws sts get-caller-identity
-  displayName: "Test AWS Connection"
-  env:
-    AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
-    AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
-    AWS_DEFAULT_REGION: $(AWS_REGION)
+  - job: DeployInfrastructure
+    displayName: "Deploy AWS Infrastructure"
+
+    steps:
+
+    # ==========================================
+    # Checkout
+    # ==========================================
+    - checkout: self
+
+
+    # ==========================================
+    # Test AWS Connection
+    # ==========================================
+    - script: |
+        echo "Testing AWS connection..."
+        aws sts get-caller-identity
+      displayName: "Test AWS Connection"
+      env:
+        AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+        AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+        AWS_DEFAULT_REGION: $(AWS_REGION)
+
+
+    # ==========================================
+    # Install Terraform
+    # ==========================================
+    - script: |
+        echo "Installing Terraform..."
+
+        wget -q https://releases.hashicorp.com/terraform/1.13.3/terraform_1.13.3_linux_amd64.zip
+        unzip -o terraform_1.13.3_linux_amd64.zip
+        sudo mv terraform /usr/local/bin/terraform
+
+        terraform version
+      displayName: "Install Terraform"
+
+
+    # ==========================================
+    # Terraform Format
+    # ==========================================
+    - script: |
+        terraform fmt -check -recursive
+      displayName: "Terraform Format Check"
+
+
+    # ==========================================
+    # Terraform Init
+    # ==========================================
+    - script: |
+        terraform init -input=false
+      displayName: "Terraform Init"
+      env:
+        AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+        AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+        AWS_DEFAULT_REGION: $(AWS_REGION)
+
+
+    # ==========================================
+    # Terraform Validate
+    # ==========================================
+    - script: |
+        terraform validate
+      displayName: "Terraform Validate"
 
 
-# ==========================================
-# Install Terraform
-# ==========================================
-- script: |
-    echo "Installing Terraform..."
+    # ==========================================
+    # Install TFLint
+    # ==========================================
+    - script: |
+        echo "Installing TFLint..."
 
-    wget -q https://releases.hashicorp.com/terraform/1.13.3/terraform_1.13.3_linux_amd64.zip
+        curl -sSLO https://github.com/terraform-linters/tflint/releases/latest/download/tflint_linux_amd64.zip
+        unzip -o tflint_linux_amd64.zip
+        sudo install -c -v tflint /usr/local/bin/
 
-    unzip -o terraform_1.13.3_linux_amd64.zip
+        tflint --version
+      displayName: "Install TFLint"
 
-    sudo mv terraform /usr/local/bin/terraform
 
-    terraform version
-  displayName: "Install Terraform"
+    # ==========================================
+    # Terraform Code Analysis
+    # ==========================================
+    - script: |
+        echo "Initialising TFLint..."
+        tflint --init
 
-
-# ==========================================
-# Terraform Format Check
-# ==========================================
-- script: |
-    echo "Checking Terraform formatting..."
-
-    terraform fmt -check -recursive
-  displayName: "Terraform Format Check"
-
-
-# ==========================================
-# Terraform Init
-# ==========================================
-- script: |
-    echo "Initializing Terraform..."
-
-    terraform init -input=false
-  displayName: "Terraform Init"
-  env:
-    AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
-    AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
-    AWS_DEFAULT_REGION: $(AWS_REGION)
-
-
-# ==========================================
-# Terraform Validate
-# ==========================================
-- script: |
-    echo "Validating Terraform configuration..."
-
-    terraform validate
-  displayName: "Terraform Validate"
-
-
-# ==========================================
-# Install TFLint
-# ==========================================
-- script: |
-    echo "Installing TFLint..."
-
-    curl -sSLO https://github.com/terraform-linters/tflint/releases/latest/download/tflint_linux_amd64.zip
-
-    unzip -o tflint_linux_amd64.zip
-
-    sudo install -c -v tflint /usr/local/bin/
-
-    echo "TFLint version:"
-    tflint --version
-  displayName: "Install TFLint"
-
-
-# ==========================================
-# Terraform Code Analysis
-# ==========================================
-- script: |
-    echo "Initialising TFLint..."
-
-    tflint --init
-
-    echo "Running Terraform code analysis..."
-
-    tflint --recursive
-  displayName: "Terraform Code Analysis - TFLint"
-
-
-# ==========================================
-# Terraform Plan
-# ==========================================
-- script: |
-    echo "Creating Terraform plan..."
-
-    terraform plan \
-      -input=false \
-      -out=tfplan
-  displayName: "Terraform Plan"
-  env:
-    AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
-    AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
-    AWS_DEFAULT_REGION: $(AWS_REGION)
-
-
-# ==========================================
-# Terraform Apply
-# ==========================================
-- script: |
-    echo "Applying Terraform configuration..."
-
-    terraform apply \
-      -input=false \
-      -auto-approve \
-      tfplan
-  displayName: "Terraform Apply"
-  env:
-    AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
-    AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
-    AWS_DEFAULT_REGION: $(AWS_REGION)
-
-
-# ==========================================
-# Wait for EKS Cluster
-# ==========================================
-- script: |
-    echo "Waiting for EKS cluster to become ACTIVE..."
-
-    aws eks wait cluster-active \
-      --name celonis-eks-dev \
-      --region us-east-2
-
-    echo "EKS cluster status:"
-
-    aws eks describe-cluster \
-      --name celonis-eks-dev \
-      --region us-east-2 \
-      --query 'cluster.status' \
-      --output text
-  displayName: "Wait for EKS Cluster"
-  env:
-    AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
-    AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
-    AWS_DEFAULT_REGION: $(AWS_REGION)
-
-
-# ==========================================
-# Install kubectl
-# ==========================================
-- task: KubectlInstaller@0
-  displayName: "Install kubectl"
-  inputs:
-    kubectlVersion: 'latest'
-
-
-# ==========================================
-# Check kubectl
-# ==========================================
-- script: |
-    echo "kubectl version:"
-
-    kubectl version --client
-  displayName: "Check kubectl"
-
-
-# ==========================================
-# Configure kubectl for EKS
-# ==========================================
-- script: |
-    echo "Configuring kubeconfig for EKS..."
-
-    aws eks update-kubeconfig \
-      --region us-east-2 \
-      --name celonis-eks-dev
-
-    echo "Current Kubernetes context:"
-    kubectl config current-context
-
-    echo "EKS nodes:"
-    kubectl get nodes -o wide
-
-    echo "All Kubernetes pods:"
-    kubectl get pods -A
-  displayName: "Configure kubectl and Verify EKS"
-  env:
-    AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
-    AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
-    AWS_DEFAULT_REGION: $(AWS_REGION)
-
-# ==========================================
-# Create SonarQube Kubernetes Secrets
-# ==========================================
-- script: |
-    set -e
-
-    echo "Creating SonarQube namespace..."
-
-    kubectl create namespace sonarqube \
-      --dry-run=client \
-      -o yaml | kubectl apply -f -
-
-    echo "Retrieving RDS secret from AWS Secrets Manager..."
-
-    RDS_SECRET_ARN=$(terraform output -raw rds_master_secret_arn)
-
-    DB_PASSWORD=$(aws secretsmanager get-secret-value \
-      --secret-id "$RDS_SECRET_ARN" \
-      --query SecretString \
-      --output text | jq -r '.password')
-
-    echo "Creating SonarQube JDBC secret..."
-
-    kubectl create secret generic sonarqube-jdbc \
-      --namespace sonarqube \
-      --from-literal=jdbc-password="$DB_PASSWORD" \
-      --dry-run=client \
-      -o yaml | kubectl apply -f -
-
-    unset DB_PASSWORD
-
-    echo "Creating SonarQube monitoring secret..."
-
-    kubectl create secret generic sonarqube-monitoring \
-      --namespace sonarqube \
-      --from-literal=monitoring-passcode="$SONAR_MONITORING_PASSCODE" \
-      --dry-run=client \
-      -o yaml | kubectl apply -f -
-
-    echo "SonarQube secrets created successfully."
-  displayName: "Create SonarQube Secrets"
-  env:
-    AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
-    AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
-    AWS_DEFAULT_REGION: $(AWS_REGION)
-    SONAR_MONITORING_PASSCODE: $(SONAR_MONITORING_PASSCODE)
-
-# ==========================================
-# SonarQube Terraform Init
-# ==========================================
-- script: |
-    terraform init -input=false
-  workingDirectory: application
-  displayName: "SonarQube Terraform Init"
-  env:
-    AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
-    AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
-    AWS_DEFAULT_REGION: $(AWS_REGION)
-
-
-# ==========================================
-# SonarQube Terraform Validate
-# ==========================================
-- script: |
-    terraform validate
-  workingDirectory: application
-  displayName: "SonarQube Terraform Validate"
-
-
-# ==========================================
-# SonarQube Terraform Plan
-# ==========================================
-- script: |
-    terraform plan \
-      -input=false \
-      -out=sonarqube.tfplan
-  workingDirectory: application
-  displayName: "SonarQube Terraform Plan"
-  env:
-    AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
-    AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
-    AWS_DEFAULT_REGION: $(AWS_REGION)
-
-
-# ==========================================
-# Deploy SonarQube using Terraform Helm
-# ==========================================
-- script: |
-    terraform apply \
-      -input=false \
-      -auto-approve \
-      sonarqube.tfplan
-  workingDirectory: application
-  displayName: "Deploy SonarQube with Helm"
-  env:
-    AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
-    AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
-    AWS_DEFAULT_REGION: $(AWS_REGION)
-
-
-# ==========================================
-# Verify SonarQube
-# ==========================================
-- script: |
-    echo "SonarQube Helm release:"
-    helm list -n sonarqube
-
-    echo "SonarQube pods:"
-    kubectl get pods -n sonarqube -o wide
-
-    echo "SonarQube service:"
-    kubectl get service -n sonarqube
-  displayName: "Verify SonarQube Deployment"
+        echo "Running Terraform code analysis..."
+        tflint --recursive
+      displayName: "Terraform Code Analysis - TFLint"
+
+
+    # ==========================================
+    # Terraform Plan
+    # ==========================================
+    - script: |
+        terraform plan \
+          -input=false \
+          -out=tfplan
+      displayName: "Terraform Plan - Infrastructure"
+      env:
+        AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+        AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+        AWS_DEFAULT_REGION: $(AWS_REGION)
+
+
+    # ==========================================
+    # Terraform Apply
+    # ==========================================
+    - script: |
+        terraform apply \
+          -input=false \
+          -auto-approve \
+          tfplan
+      displayName: "Terraform Apply - Infrastructure"
+      env:
+        AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+        AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+        AWS_DEFAULT_REGION: $(AWS_REGION)
+
+
+    # ==========================================
+    # Verify EKS Cluster
+    # ==========================================
+    - script: |
+        echo "Waiting for EKS cluster..."
+
+        aws eks wait cluster-active \
+          --name celonis-eks-dev \
+          --region us-east-2
+
+        echo "EKS cluster status:"
+
+        aws eks describe-cluster \
+          --name celonis-eks-dev \
+          --region us-east-2 \
+          --query 'cluster.status' \
+          --output text
+
+        echo "Infrastructure deployment completed successfully."
+      displayName: "Verify EKS Cluster"
+      env:
+        AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+        AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+        AWS_DEFAULT_REGION: $(AWS_REGION)
+
+
+
+# ============================================================
+# STAGE 2 - APPLICATION DEPLOYMENT
+# ============================================================
+
+- stage: ApplicationDeployment
+  displayName: "Stage 2 - SonarQube Deployment"
+
+  dependsOn: Infrastructure
+
+  condition: succeeded()
+
+  jobs:
+
+  - job: DeploySonarQube
+    displayName: "Deploy SonarQube"
+
+    steps:
+
+    # ==========================================
+    # Checkout
+    # ==========================================
+    - checkout: self
+
+
+    # ==========================================
+    # Test AWS Connection
+    # ==========================================
+    - script: |
+        echo "Testing AWS connection..."
+        aws sts get-caller-identity
+      displayName: "Test AWS Connection"
+      env:
+        AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+        AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+        AWS_DEFAULT_REGION: $(AWS_REGION)
+
+
+    # ==========================================
+    # Install Terraform
+    # ==========================================
+    - script: |
+        echo "Installing Terraform..."
+
+        wget -q https://releases.hashicorp.com/terraform/1.13.3/terraform_1.13.3_linux_amd64.zip
+        unzip -o terraform_1.13.3_linux_amd64.zip
+        sudo mv terraform /usr/local/bin/terraform
+
+        terraform version
+      displayName: "Install Terraform"
+
+
+    # ==========================================
+    # Install kubectl
+    # ==========================================
+    - task: KubectlInstaller@0
+      displayName: "Install kubectl"
+      inputs:
+        kubectlVersion: 'latest'
+
+
+    # ==========================================
+    # Install Helm
+    # ==========================================
+    - task: HelmInstaller@1
+      displayName: "Install Helm"
+      inputs:
+        helmVersionToInstall: 'latest'
+
+
+    # ==========================================
+    # Verify Tools
+    # ==========================================
+    - script: |
+        terraform version
+        kubectl version --client
+        helm version
+      displayName: "Verify Deployment Tools"
+
+
+    # ==========================================
+    # Configure kubectl
+    # ==========================================
+    - script: |
+        echo "Configuring kubeconfig..."
+
+        aws eks update-kubeconfig \
+          --region us-east-2 \
+          --name celonis-eks-dev
+
+        echo "Current Kubernetes context:"
+        kubectl config current-context
+
+        echo "EKS nodes:"
+        kubectl get nodes -o wide
+
+        echo "Kubernetes system pods:"
+        kubectl get pods -n kube-system
+      displayName: "Configure kubectl"
+      env:
+        AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+        AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+        AWS_DEFAULT_REGION: $(AWS_REGION)
+
+
+    # ==========================================
+    # Initialise Infrastructure State
+    #
+    # Required because this is a fresh agent
+    # and we need the RDS secret ARN output.
+    # ==========================================
+    - script: |
+        terraform init -input=false
+      displayName: "Initialize Infrastructure State"
+      env:
+        AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+        AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+        AWS_DEFAULT_REGION: $(AWS_REGION)
+
+
+    # ==========================================
+    # Create SonarQube Kubernetes Secrets
+    # ==========================================
+    - script: |
+        set -e
+
+        echo "Creating SonarQube namespace..."
+
+        kubectl create namespace sonarqube \
+          --dry-run=client \
+          -o yaml | kubectl apply -f -
+
+        echo "Retrieving RDS secret ARN..."
+
+        RDS_SECRET_ARN=$(terraform output -raw rds_master_secret_arn)
+
+        echo "Retrieving RDS password from AWS Secrets Manager..."
+
+        DB_PASSWORD=$(aws secretsmanager get-secret-value \
+          --secret-id "$RDS_SECRET_ARN" \
+          --query SecretString \
+          --output text | jq -r '.password')
+
+        if [ -z "$DB_PASSWORD" ] || [ "$DB_PASSWORD" = "null" ]; then
+          echo "ERROR: Failed to retrieve RDS password."
+          exit 1
+        fi
+
+        echo "Creating SonarQube JDBC secret..."
+
+        kubectl create secret generic sonarqube-jdbc \
+          --namespace sonarqube \
+          --from-literal=jdbc-password="$DB_PASSWORD" \
+          --dry-run=client \
+          -o yaml | kubectl apply -f -
+
+        unset DB_PASSWORD
+
+        echo "Creating SonarQube monitoring secret..."
+
+        kubectl create secret generic sonarqube-monitoring \
+          --namespace sonarqube \
+          --from-literal=monitoring-passcode="$SONAR_MONITORING_PASSCODE" \
+          --dry-run=client \
+          -o yaml | kubectl apply -f -
+
+        echo "SonarQube Kubernetes secrets created successfully."
+      displayName: "Create SonarQube Secrets"
+      env:
+        AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+        AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+        AWS_DEFAULT_REGION: $(AWS_REGION)
+        SONAR_MONITORING_PASSCODE: $(SONAR_MONITORING_PASSCODE)
+
+
+    # ==========================================
+    # SonarQube Terraform Init
+    # ==========================================
+    - script: |
+        terraform init -input=false
+      workingDirectory: application
+      displayName: "SonarQube Terraform Init"
+      env:
+        AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+        AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+        AWS_DEFAULT_REGION: $(AWS_REGION)
+
+
+    # ==========================================
+    # SonarQube Terraform Validate
+    # ==========================================
+    - script: |
+        terraform validate
+      workingDirectory: application
+      displayName: "SonarQube Terraform Validate"
+
+
+    # ==========================================
+    # SonarQube Terraform Plan
+    # ==========================================
+    - script: |
+        terraform plan \
+          -input=false \
+          -out=sonarqube.tfplan
+      workingDirectory: application
+      displayName: "SonarQube Terraform Plan"
+      env:
+        AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+        AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+        AWS_DEFAULT_REGION: $(AWS_REGION)
+
+
+    # ==========================================
+    # Deploy SonarQube
+    # ==========================================
+    - script: |
+        terraform apply \
+          -input=false \
+          -auto-approve \
+          sonarqube.tfplan
+      workingDirectory: application
+      displayName: "Deploy SonarQube with Terraform Helm Provider"
+      env:
+        AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+        AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+        AWS_DEFAULT_REGION: $(AWS_REGION)
+
+
+    # ==========================================
+    # Verify SonarQube
+    # ==========================================
+    - script: |
+        echo "========================================"
+        echo "SonarQube Helm Release"
+        echo "========================================"
+
+        helm list -n sonarqube
+
+        echo ""
+        echo "========================================"
+        echo "SonarQube Pods"
+        echo "========================================"
+
+        kubectl get pods -n sonarqube -o wide
+
+        echo ""
+        echo "========================================"
+        echo "SonarQube Services"
+        echo "========================================"
+
+        kubectl get services -n sonarqube
+
+        echo ""
+        echo "========================================"
+        echo "SonarQube Deployment Complete"
+        echo "========================================"
+      displayName: "Verify SonarQube Deployment"
