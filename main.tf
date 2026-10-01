@@ -47,7 +47,7 @@ module "eks" {
 
   subnet_ids = module.vpc.private_subnet_ids
 
-  instance_type = "t3.medium"
+  instance_type = "c7i.flex.large"
 
   desired_size = 2
   min_size     = 1
