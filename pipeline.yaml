@@ -9,16 +9,23 @@ variables:
 
 steps:
 
+# ==========================================
+# Checkout Repository
+# ==========================================
 - checkout: self
 
 
+# ==========================================
 # Test Pipeline
+# ==========================================
 - script: |
     echo "Azure DevOps pipeline is working"
   displayName: "Test Pipeline"
 
 
+# ==========================================
 # Test AWS Connection
+# ==========================================
 - script: |
     aws sts get-caller-identity
   displayName: "Test AWS Connection"
@@ -28,7 +35,9 @@ steps:
     AWS_DEFAULT_REGION: $(AWS_REGION)
 
 
+# ==========================================
 # Install Terraform
+# ==========================================
 - script: |
     wget -q https://releases.hashicorp.com/terraform/1.13.3/terraform_1.13.3_linux_amd64.zip
     unzip -o terraform_1.13.3_linux_amd64.zip
@@ -37,15 +46,19 @@ steps:
   displayName: "Install Terraform"
 
 
-# Terraform Format
+# ==========================================
+# Terraform Format Check
+# ==========================================
 - script: |
     terraform fmt -check -recursive
   displayName: "Terraform Format Check"
 
 
+# ==========================================
 # Terraform Init
+# ==========================================
 - script: |
-    terraform init
+    terraform init -input=false
   displayName: "Terraform Init"
   env:
     AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
@@ -53,24 +66,31 @@ steps:
     AWS_DEFAULT_REGION: $(AWS_REGION)
 
 
+# ==========================================
 # Terraform Validate
+# ==========================================
 - script: |
     terraform validate
   displayName: "Terraform Validate"
 
 
+# ==========================================
 # Terraform Plan
+# ==========================================
 - script: |
-    terraform plan -out=tfplan
+    terraform plan -input=false -out=tfplan
   displayName: "Terraform Plan"
   env:
     AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
     AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
     AWS_DEFAULT_REGION: $(AWS_REGION)
 
+
+# ==========================================
 # Terraform Apply
+# ==========================================
 - script: |
-    terraform apply -auto-approve tfplan
+    terraform apply -input=false -auto-approve tfplan
   displayName: "Terraform Apply"
   env:
     AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
@@ -78,13 +98,17 @@ steps:
     AWS_DEFAULT_REGION: $(AWS_REGION)
 
 
+# ==========================================
 # Wait for EKS Cluster
+# ==========================================
 - script: |
     echo "Waiting for EKS cluster to become ACTIVE..."
 
     aws eks wait cluster-active \
       --name celonis-eks-dev \
       --region us-east-2
+
+    echo "EKS cluster status:"
 
     aws eks describe-cluster \
       --name celonis-eks-dev \
@@ -98,13 +122,27 @@ steps:
     AWS_DEFAULT_REGION: $(AWS_REGION)
 
 
+# ==========================================
+# Check kubectl
+# ==========================================
+- script: |
+    kubectl version --client
+  displayName: "Check kubectl"
+
+
+# ==========================================
 # Configure kubectl
+# ==========================================
 - script: |
     aws eks update-kubeconfig \
       --region us-east-2 \
       --name celonis-eks-dev
 
-    kubectl get nodes
+    echo "Current Kubernetes context:"
+    kubectl config current-context
+
+    echo "EKS Nodes:"
+    kubectl get nodes -o wide
   displayName: "Configure kubectl and Verify EKS"
   env:
     AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
