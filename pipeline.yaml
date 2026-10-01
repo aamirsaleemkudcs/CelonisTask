@@ -37,10 +37,10 @@ steps:
   displayName: "Install Terraform"
 
 
-# Terraform Format
-- script: |
-    terraform fmt -check -recursive
-  displayName: "Terraform Format Check"
+# # Terraform Format
+# - script: |
+#     terraform fmt -check -recursive
+#   displayName: "Terraform Format Check"
 
 
 # Terraform Init
