@@ -27,9 +27,9 @@ resource "aws_subnet" "public" {
   map_public_ip_on_launch = true
 
   tags = {
-    Name        = "${var.project_name}-public-subnet"
-    Environment = var.environment
-    Type        = "Public"
+    Name                     = "${var.project_name}-public-subnet"
+    Environment              = var.environment
+    Type                     = "Public"
     "kubernetes.io/role/elb" = "1"
   }
 }
@@ -47,9 +47,9 @@ resource "aws_subnet" "private" {
   map_public_ip_on_launch = false
 
   tags = {
-    Name        = "${var.project_name}-private-subnet"
-    Environment = var.environment
-    Type        = "Private"
+    Name                              = "${var.project_name}-private-subnet"
+    Environment                       = var.environment
+    Type                              = "Private"
     "kubernetes.io/role/internal-elb" = "1"
   }
 }
@@ -123,7 +123,7 @@ resource "aws_route_table_association" "private" {
 }
 
 # ----------------------------------
-# Adding  Private Subnet 2
+# Private Subnet 2
 # ----------------------------------
 
 resource "aws_subnet" "private_2" {
@@ -135,9 +135,9 @@ resource "aws_subnet" "private_2" {
   map_public_ip_on_launch = false
 
   tags = {
-    Name        = "${var.project_name}-private-subnet-2"
-    Environment = var.environment
-    Type        = "Private"
+    Name                              = "${var.project_name}-private-subnet-2"
+    Environment                       = var.environment
+    Type                              = "Private"
     "kubernetes.io/role/internal-elb" = "1"
   }
 }
@@ -232,7 +232,7 @@ resource "aws_nat_gateway" "main" {
   subnet_id     = aws_subnet.public.id
 
   depends_on = [
-  aws_internet_gateway.main
+    aws_internet_gateway.main
   ]
 
   tags = {
