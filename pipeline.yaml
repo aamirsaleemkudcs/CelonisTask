@@ -60,24 +60,13 @@ steps:
 
 
 # Terraform Plan
-# - script: |
-#     terraform plan -out=tfplan
-#   displayName: "Terraform Plan"
-#   env:
-#     AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
-#     AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
-#     AWS_DEFAULT_REGION: $(AWS_REGION)
-
 - script: |
-    terraform plan \
-      -replace="module.eks.aws_eks_node_group.main" \
-      -out=tfplan
-  displayName: "Terraform Plan - Recreate EKS Nodes"
+    terraform plan -out=tfplan
+  displayName: "Terraform Plan"
   env:
     AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
     AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
     AWS_DEFAULT_REGION: $(AWS_REGION)
-
 
 # Terraform Apply
 - script: |
