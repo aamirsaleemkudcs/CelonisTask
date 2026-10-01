@@ -1,0 +1,166 @@
+trigger: none
+pr: none
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+- group: AWS
+
+stages:
+
+- stage: Infrastructure
+  displayName: "Infrastructure"
+
+  jobs:
+
+  - job: DeployInfrastructure
+    displayName: "Deploy AWS Infrastructure"
+
+    steps:
+
+    # ==========================================
+    # Checkout
+    # ==========================================
+    - checkout: self
+
+
+    # ==========================================
+    # Test AWS Connection
+    # ==========================================
+    - script: |
+        echo "Testing AWS connection..."
+        aws sts get-caller-identity
+      displayName: "Test AWS Connection"
+      env:
+        AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+        AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+        AWS_DEFAULT_REGION: $(AWS_REGION)
+
+
+    # ==========================================
+    # Install Terraform
+    # ==========================================
+    - script: |
+        echo "Installing Terraform..."
+
+        wget -q https://releases.hashicorp.com/terraform/1.13.3/terraform_1.13.3_linux_amd64.zip
+        unzip -o terraform_1.13.3_linux_amd64.zip
+        sudo mv terraform /usr/local/bin/terraform
+
+        terraform version
+      displayName: "Install Terraform"
+
+
+    # ==========================================
+    # Terraform Format
+    # ==========================================
+    - script: |
+        terraform fmt -check -recursive
+      displayName: "Terraform Format Check"
+
+
+    # ==========================================
+    # Terraform Init
+    # ==========================================
+    - script: |
+        terraform init -input=false
+      displayName: "Terraform Init"
+      env:
+        AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+        AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+        AWS_DEFAULT_REGION: $(AWS_REGION)
+
+
+    # ==========================================
+    # Terraform Validate
+    # ==========================================
+    - script: |
+        terraform validate
+      displayName: "Terraform Validate"
+
+
+    # ==========================================
+    # Install TFLint
+    # ==========================================
+    - script: |
+        echo "Installing TFLint..."
+
+        curl -sSLO https://github.com/terraform-linters/tflint/releases/latest/download/tflint_linux_amd64.zip
+        unzip -o tflint_linux_amd64.zip
+        sudo install -c -v tflint /usr/local/bin/
+
+        tflint --version
+      displayName: "Install TFLint"
+
+
+    # ==========================================
+    # Terraform Code Analysis
+    # ==========================================
+    - script: |
+        echo "Initialising TFLint..."
+        tflint --init
+
+        echo "Running Terraform code analysis..."
+        tflint --recursive
+      displayName: "Terraform Code Analysis - TFLint"
+
+
+    # ==========================================
+    # Terraform Plan
+    # ==========================================
+    - script: |
+        terraform plan \
+          -input=false \
+          -out=tfplan
+      displayName: "Terraform Plan"
+      env:
+        AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+        AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+        AWS_DEFAULT_REGION: $(AWS_REGION)
+
+
+    # ==========================================
+    # Terraform Apply
+    # ==========================================
+    - script: |
+        terraform apply \
+          -input=false \
+          -auto-approve \
+          tfplan
+      displayName: "Terraform Apply"
+      env:
+        AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+        AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+        AWS_DEFAULT_REGION: $(AWS_REGION)
+
+
+    # ==========================================
+    # Verify Infrastructure
+    # ==========================================
+    - script: |
+        echo "Waiting for EKS cluster..."
+
+        aws eks wait cluster-active \
+          --name celonis-eks-dev \
+          --region us-east-2
+
+        echo "EKS status:"
+
+        aws eks describe-cluster \
+          --name celonis-eks-dev \
+          --region us-east-2 \
+          --query 'cluster.status' \
+          --output text
+
+        echo ""
+        echo "Terraform outputs:"
+        terraform output
+
+        echo ""
+        echo "Infrastructure deployment completed."
+      displayName: "Verify Infrastructure"
+      env:
+        AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+        AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+        AWS_DEFAULT_REGION: $(AWS_REGION)
