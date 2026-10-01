@@ -22,7 +22,7 @@ module "vpc" {
 
   vpc_cidr = "10.0.0.0/16"
 
-  public_subnet_cidr    = "10.0.1.0/24"
+  public_subnet_cidr = "10.0.1.0/24"
 
   private_subnet_cidr   = "10.0.2.0/24"
   private_subnet_2_cidr = "10.0.3.0/24"
@@ -34,30 +34,30 @@ module "vpc" {
   availability_zone_2 = "us-east-2b"
 }
 
-# ==========================================
+
+# ==================================
 # EKS Module
-# ==========================================
+# ==================================
 
-module "eks" {
+#module "eks" {
+#  source = "./TF_Modules/EKS"
+#
+#  cluster_name = "celonis-eks-dev"
+#  environment  = "dev"
+#
+#  subnet_ids = module.vpc.private_subnet_ids
+#
+#  instance_type = "t3.small"
+#
+#  desired_size = 2
+#  min_size     = 1
+#  max_size     = 3
+#}
 
-  source = "./TF_Modules/EKS"
 
-  cluster_name = "celonis-eks-dev"
-
-  environment = "dev"
-
-  subnet_ids = module.vpc.private_subnet_ids
-
-  instance_type = "t3.small"
-
-  desired_size = 2
-  min_size     = 1
-  max_size     = 3
-}
-
-# ==========================================
+# ==================================
 # RDS PostgreSQL Module
-# ==========================================
+# ==================================
 
 module "rds" {
   source = "./TF_Modules/RDS"
