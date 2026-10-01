@@ -34,7 +34,7 @@ module "vpc" {
   availability_zone_2 = "us-east-2b"
 }
 
-/*
+
 # ==================================
 # EKS Module
 # ==================================
@@ -56,7 +56,7 @@ module "eks" {
   admin_principal_arn = "arn:aws:iam::283548940919:user/aamirsaleemkudcs"
 }
 
-
+/*
 # ==================================
 # RDS PostgreSQL Module
 # ==================================
