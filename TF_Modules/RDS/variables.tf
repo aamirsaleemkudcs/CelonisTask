@@ -46,3 +46,9 @@ variable "multi_az" {
   type        = bool
   default     = false
 }
+
+variable "backup_retention_period" {
+  description = "Number of days to retain automated RDS backups"
+  type        = number
+  default     = 7
+}

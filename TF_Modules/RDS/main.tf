@@ -79,7 +79,7 @@ resource "aws_db_instance" "postgres" {
 
   multi_az = var.multi_az
 
-  backup_retention_period = 7
+  backup_retention_period = var.backup_retention_period
 
   auto_minor_version_upgrade = true
 

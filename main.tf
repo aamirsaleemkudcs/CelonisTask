@@ -77,6 +77,7 @@ module "rds" {
   ]
 
   db_instance_class = "db.t3.micro"
+  backup_retention_period = 1
 
   db_name     = "sonarqube"
   db_username = "sonaradmin"
