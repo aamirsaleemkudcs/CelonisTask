@@ -217,3 +217,117 @@ steps:
     AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
     AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
     AWS_DEFAULT_REGION: $(AWS_REGION)
+
+# ==========================================
+# Create SonarQube Kubernetes Secrets
+# ==========================================
+- script: |
+    set -e
+
+    echo "Creating SonarQube namespace..."
+
+    kubectl create namespace sonarqube \
+      --dry-run=client \
+      -o yaml | kubectl apply -f -
+
+    echo "Retrieving RDS secret from AWS Secrets Manager..."
+
+    RDS_SECRET_ARN=$(terraform output -raw rds_master_secret_arn)
+
+    DB_PASSWORD=$(aws secretsmanager get-secret-value \
+      --secret-id "$RDS_SECRET_ARN" \
+      --query SecretString \
+      --output text | jq -r '.password')
+
+    echo "Creating SonarQube JDBC secret..."
+
+    kubectl create secret generic sonarqube-jdbc \
+      --namespace sonarqube \
+      --from-literal=jdbc-password="$DB_PASSWORD" \
+      --dry-run=client \
+      -o yaml | kubectl apply -f -
+
+    unset DB_PASSWORD
+
+    echo "Creating SonarQube monitoring secret..."
+
+    kubectl create secret generic sonarqube-monitoring \
+      --namespace sonarqube \
+      --from-literal=monitoring-passcode="$SONAR_MONITORING_PASSCODE" \
+      --dry-run=client \
+      -o yaml | kubectl apply -f -
+
+    echo "SonarQube secrets created successfully."
+  displayName: "Create SonarQube Secrets"
+  env:
+    AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+    AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+    AWS_DEFAULT_REGION: $(AWS_REGION)
+    SONAR_MONITORING_PASSCODE: $(SONAR_MONITORING_PASSCODE)
+
+# ==========================================
+# SonarQube Terraform Init
+# ==========================================
+- script: |
+    terraform init -input=false
+  workingDirectory: application
+  displayName: "SonarQube Terraform Init"
+  env:
+    AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+    AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+    AWS_DEFAULT_REGION: $(AWS_REGION)
+
+
+# ==========================================
+# SonarQube Terraform Validate
+# ==========================================
+- script: |
+    terraform validate
+  workingDirectory: application
+  displayName: "SonarQube Terraform Validate"
+
+
+# ==========================================
+# SonarQube Terraform Plan
+# ==========================================
+- script: |
+    terraform plan \
+      -input=false \
+      -out=sonarqube.tfplan
+  workingDirectory: application
+  displayName: "SonarQube Terraform Plan"
+  env:
+    AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+    AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+    AWS_DEFAULT_REGION: $(AWS_REGION)
+
+
+# ==========================================
+# Deploy SonarQube using Terraform Helm
+# ==========================================
+- script: |
+    terraform apply \
+      -input=false \
+      -auto-approve \
+      sonarqube.tfplan
+  workingDirectory: application
+  displayName: "Deploy SonarQube with Helm"
+  env:
+    AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+    AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+    AWS_DEFAULT_REGION: $(AWS_REGION)
+
+
+# ==========================================
+# Verify SonarQube
+# ==========================================
+- script: |
+    echo "SonarQube Helm release:"
+    helm list -n sonarqube
+
+    echo "SonarQube pods:"
+    kubectl get pods -n sonarqube -o wide
+
+    echo "SonarQube service:"
+    kubectl get service -n sonarqube
+  displayName: "Verify SonarQube Deployment"
