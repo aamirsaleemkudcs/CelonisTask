@@ -76,7 +76,7 @@ module "rds" {
     "10.0.3.0/24"
   ]
 
-  db_instance_class = "db.t3.micro"
+  db_instance_class       = "db.t3.micro"
   backup_retention_period = 1
 
   db_name     = "sonarqube"
