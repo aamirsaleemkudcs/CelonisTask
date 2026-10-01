@@ -219,3 +219,47 @@ resource "aws_route_table_association" "database_2" {
   subnet_id      = aws_subnet.database_2.id
   route_table_id = aws_route_table.database.id
 }
+
+# ==========================================
+# Elastic IP for NAT Gateway
+# ==========================================
+
+resource "aws_eip" "nat" {
+  domain = "vpc"
+
+  tags = {
+    Name        = "${var.project_name}-nat-eip"
+    Environment = var.environment
+  }
+}
+
+
+# ==========================================
+# NAT Gateway
+# ==========================================
+
+resource "aws_nat_gateway" "main" {
+  allocation_id = aws_eip.nat.id
+  subnet_id     = aws_subnet.public.id
+
+  depends_on = [
+    aws_internet_gateway.main
+  ]
+
+  tags = {
+    Name        = "${var.project_name}-nat-gateway"
+    Environment = var.environment
+  }
+}
+
+
+# ==========================================
+# Private Route -> NAT Gateway
+# ==========================================
+
+resource "aws_route" "private_internet" {
+  route_table_id = aws_route_table.private.id
+
+  destination_cidr_block = "0.0.0.0/0"
+  nat_gateway_id         = aws_nat_gateway.main.id
+}
