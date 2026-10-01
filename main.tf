@@ -56,7 +56,7 @@ module "eks" {
   admin_principal_arn = "arn:aws:iam::283548940919:user/aamirsaleemkudcs"
 }
 
-/*
+
 # ==================================
 # RDS PostgreSQL Module
 # ==================================
@@ -85,4 +85,4 @@ module "rds" {
   db_username = "sonaradmin"
 
   multi_az = false
-}*/
+}
