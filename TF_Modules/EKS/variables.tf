@@ -33,3 +33,8 @@ variable "max_size" {
   type    = number
   default = 3
 }
+
+variable "admin_principal_arn" {
+  description = "IAM principal granted administrator access to the EKS cluster"
+  type        = string
+}

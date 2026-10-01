@@ -76,3 +76,37 @@ steps:
     AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
     AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
     AWS_DEFAULT_REGION: $(AWS_REGION)
+
+
+# Wait for EKS Cluster
+- script: |
+    echo "Waiting for EKS cluster to become ACTIVE..."
+
+    aws eks wait cluster-active \
+      --name celonis-eks-dev \
+      --region us-east-2
+
+    aws eks describe-cluster \
+      --name celonis-eks-dev \
+      --region us-east-2 \
+      --query 'cluster.status' \
+      --output text
+  displayName: "Wait for EKS Cluster"
+  env:
+    AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+    AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+    AWS_DEFAULT_REGION: $(AWS_REGION)
+
+
+# Configure kubectl
+- script: |
+    aws eks update-kubeconfig \
+      --region us-east-2 \
+      --name celonis-eks-dev
+
+    kubectl get nodes
+  displayName: "Configure kubectl and Verify EKS"
+  env:
+    AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+    AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+    AWS_DEFAULT_REGION: $(AWS_REGION)

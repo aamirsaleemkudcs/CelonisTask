@@ -52,6 +52,8 @@ module "eks" {
   desired_size = 2
   min_size     = 1
   max_size     = 3
+
+  admin_principal_arn = "arn:aws:iam::283548940919:user/aamirsaleemkudcs"
 }
 
 
