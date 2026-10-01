@@ -34,7 +34,7 @@ module "vpc" {
   availability_zone_2 = "us-east-2b"
 }
 
-
+/*
 # ==================================
 # EKS Module
 # ==================================
@@ -52,7 +52,7 @@ module "eks" {
   desired_size = 2
   min_size     = 1
   max_size     = 3
-}
+}*/
 
 /*
 # ==================================
