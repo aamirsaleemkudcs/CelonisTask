@@ -152,3 +152,70 @@ resource "aws_route_table_association" "private_2" {
   subnet_id      = aws_subnet.private_2.id
   route_table_id = aws_route_table.private.id
 }
+
+# ==========================================
+# Isolated Database Subnet A
+# ==========================================
+
+resource "aws_subnet" "database_1" {
+  vpc_id = aws_vpc.main.id
+
+  cidr_block        = var.database_subnet_1_cidr
+  availability_zone = var.availability_zone
+
+  map_public_ip_on_launch = false
+
+  tags = {
+    Name        = "${var.project_name}-database-subnet-1"
+    Environment = var.environment
+    Type        = "Database-Isolated"
+  }
+}
+
+
+# ==========================================
+# Isolated Database Subnet B
+# ==========================================
+
+resource "aws_subnet" "database_2" {
+  vpc_id = aws_vpc.main.id
+
+  cidr_block        = var.database_subnet_2_cidr
+  availability_zone = var.availability_zone_2
+
+  map_public_ip_on_launch = false
+
+  tags = {
+    Name        = "${var.project_name}-database-subnet-2"
+    Environment = var.environment
+    Type        = "Database-Isolated"
+  }
+}
+
+
+# ==========================================
+# Database Route Table
+# No Internet Gateway
+# No NAT Gateway
+# ==========================================
+
+resource "aws_route_table" "database" {
+  vpc_id = aws_vpc.main.id
+
+  tags = {
+    Name        = "${var.project_name}-database-rt"
+    Environment = var.environment
+  }
+}
+
+
+resource "aws_route_table_association" "database_1" {
+  subnet_id      = aws_subnet.database_1.id
+  route_table_id = aws_route_table.database.id
+}
+
+
+resource "aws_route_table_association" "database_2" {
+  subnet_id      = aws_subnet.database_2.id
+  route_table_id = aws_route_table.database.id
+}

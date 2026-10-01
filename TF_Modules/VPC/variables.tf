@@ -37,3 +37,13 @@ variable "availability_zone_2" {
   description = "Second Availability Zone"
   type        = string
 }
+
+variable "database_subnet_1_cidr" {
+  description = "CIDR for database subnet in AZ1"
+  type        = string
+}
+
+variable "database_subnet_2_cidr" {
+  description = "CIDR for database subnet in AZ2"
+  type        = string
+}
