@@ -39,22 +39,22 @@ module "vpc" {
 # EKS Module
 # ==================================
 
-#module "eks" {
-#  source = "./TF_Modules/EKS"
-#
-#  cluster_name = "celonis-eks-dev"
-#  environment  = "dev"
-#
-#  subnet_ids = module.vpc.private_subnet_ids
-#
-#  instance_type = "t3.small"
-#
-#  desired_size = 2
-#  min_size     = 1
-#  max_size     = 3
-#}
+module "eks" {
+  source = "./TF_Modules/EKS"
 
+  cluster_name = "celonis-eks-dev"
+  environment  = "dev"
 
+  subnet_ids = module.vpc.private_subnet_ids
+
+  instance_type = "t3.small"
+
+  desired_size = 2
+  min_size     = 1
+  max_size     = 3
+}
+
+/*
 # ==================================
 # RDS PostgreSQL Module
 # ==================================
@@ -84,3 +84,4 @@ module "rds" {
 
   multi_az = false
 }
+*/
