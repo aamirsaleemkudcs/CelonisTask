@@ -33,7 +33,6 @@ module "vpc" {
   availability_zone   = "us-east-2a"
   availability_zone_2 = "us-east-2b"
 }
-2. Create th
 
 # ==========================================
 # EKS
