@@ -14,7 +14,6 @@ resource "aws_vpc" "main" {
   }
 }
 
-
 # ----------------------------------
 # Public Subnet
 # ----------------------------------
@@ -34,7 +33,6 @@ resource "aws_subnet" "public" {
     "kubernetes.io/role/elb" = "1"
   }
 }
-
 
 # ----------------------------------
 # Private Subnet
@@ -56,7 +54,6 @@ resource "aws_subnet" "private" {
   }
 }
 
-
 # ----------------------------------
 # Internet Gateway
 # ----------------------------------
@@ -69,7 +66,6 @@ resource "aws_internet_gateway" "main" {
     Environment = var.environment
   }
 }
-
 
 # ----------------------------------
 # Public Route Table
@@ -84,7 +80,6 @@ resource "aws_route_table" "public" {
   }
 }
 
-
 # ----------------------------------
 # Public Internet Route
 # ----------------------------------
@@ -96,7 +91,6 @@ resource "aws_route" "public_internet" {
   gateway_id             = aws_internet_gateway.main.id
 }
 
-
 # ----------------------------------
 # Associate Public Subnet
 # ----------------------------------
@@ -105,7 +99,6 @@ resource "aws_route_table_association" "public" {
   subnet_id      = aws_subnet.public.id
   route_table_id = aws_route_table.public.id
 }
-
 
 # ----------------------------------
 # Private Route Table
@@ -120,7 +113,6 @@ resource "aws_route_table" "private" {
   }
 }
 
-
 # ----------------------------------
 # Associate Private Subnet
 # ----------------------------------
@@ -131,9 +123,8 @@ resource "aws_route_table_association" "private" {
 }
 
 # ----------------------------------
-# Adding  Private Subnet 2 
+# Adding  Private Subnet 2
 # ----------------------------------
-
 
 resource "aws_subnet" "private_2" {
   vpc_id = aws_vpc.main.id
@@ -175,7 +166,6 @@ resource "aws_subnet" "database_1" {
   }
 }
 
-
 # ==========================================
 # Isolated Database Subnet B
 # ==========================================
@@ -195,7 +185,6 @@ resource "aws_subnet" "database_2" {
   }
 }
 
-
 # ==========================================
 # Database Route Table
 # No Internet Gateway
@@ -211,12 +200,10 @@ resource "aws_route_table" "database" {
   }
 }
 
-
 resource "aws_route_table_association" "database_1" {
   subnet_id      = aws_subnet.database_1.id
   route_table_id = aws_route_table.database.id
 }
-
 
 resource "aws_route_table_association" "database_2" {
   subnet_id      = aws_subnet.database_2.id
@@ -236,7 +223,6 @@ resource "aws_eip" "nat" {
   }
 }
 
-
 # ==========================================
 # NAT Gateway
 # ==========================================
@@ -246,7 +232,7 @@ resource "aws_nat_gateway" "main" {
   subnet_id     = aws_subnet.public.id
 
   depends_on = [
-    aws_internet_gateway.main
+  aws_internet_gateway.main
   ]
 
   tags = {
@@ -254,7 +240,6 @@ resource "aws_nat_gateway" "main" {
     Environment = var.environment
   }
 }
-
 
 # ==========================================
 # Private Route -> NAT Gateway
