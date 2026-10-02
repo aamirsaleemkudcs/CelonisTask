@@ -20,7 +20,7 @@ stages:
     steps:
 
     # ==========================================
-    # Checkout
+    # Checkout Repository
     # ==========================================
     - checkout: self
 
@@ -29,7 +29,7 @@ stages:
     # Test AWS Connection
     # ==========================================
     - script: |
-        set -e
+        set -euo pipefail
 
         echo "Testing AWS connection..."
         aws sts get-caller-identity
@@ -46,7 +46,7 @@ stages:
     # Install Terraform
     # ==========================================
     - script: |
-        set -e
+        set -euo pipefail
 
         echo "Installing Terraform..."
 
@@ -75,13 +75,17 @@ stages:
     # Connect to EKS
     # ==========================================
     - script: |
-        set -e
+        set -euo pipefail
 
         echo "Connecting to EKS..."
 
         aws eks update-kubeconfig \
           --region us-east-2 \
           --name celonis-eks-dev
+
+        echo ""
+        echo "Current Kubernetes context:"
+        kubectl config current-context
 
         echo ""
         echo "EKS nodes:"
@@ -96,30 +100,19 @@ stages:
 
 
     # ==========================================
-    # Initialise Infrastructure State
+    # Initialise Terraform Infrastructure State
     # ==========================================
     - script: |
-        set -e
+        set -euo pipefail
 
-        echo "Initialising Terraform infrastructure state..."
+        echo "Initialising Terraform..."
 
         terraform init -input=false
 
         echo ""
-        echo "Checking required outputs..."
+        echo "Infrastructure state initialised."
 
-        terraform output -raw rds_endpoint
-        echo ""
-
-        terraform output -raw rds_port
-        echo ""
-
-        terraform output -raw rds_db_name
-        echo ""
-
-        echo "Infrastructure state available."
-
-      displayName: "Read Infrastructure State"
+      displayName: "Initialize Infrastructure State"
 
       env:
         AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
@@ -131,37 +124,28 @@ stages:
     # Prepare Secure Database Configuration
     # ==========================================
     - script: |
-        set -e
+        set -euo pipefail
 
-        echo "Preparing database configuration..."
+        echo "========================================"
+        echo "Preparing Secure DB Configuration"
+        echo "========================================"
 
         kubectl create namespace sonarqube \
           --dry-run=client \
           -o yaml | kubectl apply -f -
 
-        # --------------------------------------
-        # Read non-sensitive DB configuration
-        # from Terraform state
-        # --------------------------------------
+        echo ""
+        echo "Reading RDS configuration from Terraform state..."
 
         RDS_ENDPOINT=$(terraform output -raw rds_endpoint)
         RDS_PORT=$(terraform output -raw rds_port)
         RDS_DATABASE=$(terraform output -raw rds_db_name)
-
-        # Protect against endpoint being hostname:port
-        RDS_HOST="${RDS_ENDPOINT%%:*}"
-
-
-        # --------------------------------------
-        # Find RDS-managed Secrets Manager secret
-        # --------------------------------------
-
         RDS_SECRET_ARN=$(terraform output -raw rds_master_secret_arn)
 
+        # Handles both hostname and hostname:port formats.
+        RDS_HOST="${RDS_ENDPOINT%%:*}"
 
-        # --------------------------------------
-        # Retrieve credentials securely
-        # --------------------------------------
+        echo "Retrieving RDS credentials securely..."
 
         SECRET_JSON=$(aws secretsmanager get-secret-value \
           --secret-id "$RDS_SECRET_ARN" \
@@ -183,12 +167,8 @@ stages:
           exit 1
         fi
 
-
-        # --------------------------------------
-        # Create/update Kubernetes Secret
-        # --------------------------------------
-
-        echo "Creating Kubernetes database Secret..."
+        echo ""
+        echo "Creating/updating Kubernetes Secret..."
 
         kubectl create secret generic sonarqube-jdbc \
           --namespace sonarqube \
@@ -200,12 +180,8 @@ stages:
         unset DB_USERNAME
         unset DB_PASSWORD
 
-
-        # --------------------------------------
-        # Create/update non-sensitive ConfigMap
-        # --------------------------------------
-
-        echo "Creating database ConfigMap..."
+        echo ""
+        echo "Creating/updating database ConfigMap..."
 
         kubectl create configmap sonarqube-db-config \
           --namespace sonarqube \
@@ -216,7 +192,7 @@ stages:
           -o yaml | kubectl apply -f -
 
         echo ""
-        echo "Database configuration prepared."
+        echo "Database configuration prepared successfully."
 
       displayName: "Prepare Secure DB Configuration"
 
@@ -227,66 +203,100 @@ stages:
 
 
     # ==========================================
-    # Check Prerequisites
+    # Verify Prerequisites
     # ==========================================
     - script: |
-        set -e
+        set -euo pipefail
 
-        echo "Checking SonarQube namespace..."
+        echo "========================================"
+        echo "Checking DB Fixer Prerequisites"
+        echo "========================================"
+
+        echo ""
+        echo "Namespace:"
         kubectl get namespace sonarqube
 
         echo ""
-        echo "Checking database Secret..."
+        echo "Database Secret:"
         kubectl get secret sonarqube-jdbc \
           -n sonarqube
 
         echo ""
-        echo "Checking database ConfigMap..."
+        echo "Database ConfigMap:"
         kubectl get configmap sonarqube-db-config \
           -n sonarqube
 
         echo ""
-        echo "Prerequisites successfully verified."
+        echo "SonarQube:"
+        kubectl get pods \
+          -n sonarqube
 
       displayName: "Check DB Fixer Prerequisites"
 
 
     # ==========================================
-    # Remove Previous Job
+    # Remove Previous DB Fixer Job
     # ==========================================
     - script: |
+        set -euo pipefail
 
         echo "Removing previous DB Fixer Job if present..."
 
         kubectl delete job sonarqube-db-fixer \
-          -n sonarqube \
-          --ignore-not-found=true
+          --namespace sonarqube \
+          --ignore-not-found=true \
+          --wait=true
 
       displayName: "Remove Previous DB Fixer Job"
 
 
     # ==========================================
-    # Run Fixer Job
+    # Deploy DB Fixer
     # ==========================================
     - script: |
-        set -e
+        set -euo pipefail
 
-        echo "Deploying database fixer..."
+        echo "========================================"
+        echo "Deploying SonarQube DB Fixer"
+        echo "========================================"
 
         kubectl apply \
           -f kubernetes/db-fixer-job.yaml
 
         echo ""
-        echo "Waiting for database operation..."
+        echo "Waiting for Job to complete..."
 
-        kubectl wait \
+        if ! kubectl wait \
           --for=condition=complete \
           job/sonarqube-db-fixer \
-          -n sonarqube \
+          --namespace sonarqube \
           --timeout=300s
+        then
+          echo ""
+          echo "ERROR: DB Fixer Job failed or timed out."
+
+          echo ""
+          echo "Job:"
+          kubectl get job sonarqube-db-fixer \
+            -n sonarqube || true
+
+          echo ""
+          echo "Pods:"
+          kubectl get pods \
+            -n sonarqube \
+            -l job-name=sonarqube-db-fixer || true
+
+          echo ""
+          echo "Job logs:"
+          kubectl logs \
+            -n sonarqube \
+            job/sonarqube-db-fixer || true
+
+          exit 1
+        fi
 
         echo ""
-        echo "Database Fixer Job completed."
+        echo "DB Fixer Job completed successfully."
 
       displayName: "Run DB Fixer"
 
@@ -295,6 +305,7 @@ stages:
     # Verify Results
     # ==========================================
     - script: |
+        set -euo pipefail
 
         echo "========================================"
         echo "DB FIXER JOB"
@@ -310,7 +321,8 @@ stages:
 
         kubectl get pods \
           -n sonarqube \
-          -l job-name=sonarqube-db-fixer
+          -l job-name=sonarqube-db-fixer \
+          -o wide
 
         echo ""
         echo "========================================"
@@ -320,5 +332,10 @@ stages:
         kubectl logs \
           -n sonarqube \
           job/sonarqube-db-fixer
+
+        echo ""
+        echo "========================================"
+        echo "DAY-2 DATABASE OPERATION SUCCESSFUL"
+        echo "========================================"
 
       displayName: "Verify Database Fix"

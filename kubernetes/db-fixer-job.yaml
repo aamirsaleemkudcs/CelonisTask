@@ -4,21 +4,25 @@ kind: Job
 metadata:
   name: sonarqube-db-fixer
   namespace: sonarqube
+
   labels:
     app: sonarqube
     component: db-fixer
 
 spec:
+
   backoffLimit: 1
   activeDeadlineSeconds: 300
 
   template:
+
     metadata:
       labels:
         app: sonarqube
         component: db-fixer
 
     spec:
+
       restartPolicy: Never
 
       containers:
@@ -29,7 +33,10 @@ spec:
 
         env:
 
+        # ======================================
         # Non-sensitive database configuration
+        # ======================================
+
         - name: PGHOST
           valueFrom:
             configMapKeyRef:
@@ -48,7 +55,11 @@ spec:
               name: sonarqube-db-config
               key: database
 
-        # Credentials come from Kubernetes Secret
+
+        # ======================================
+        # Sensitive database credentials
+        # ======================================
+
         - name: PGUSER
           valueFrom:
             secretKeyRef:
@@ -61,19 +72,100 @@ spec:
               name: sonarqube-jdbc
               key: jdbc-password
 
+
+        # ======================================
+        # Require TLS
+        # ======================================
+
         - name: PGSSLMODE
           value: "require"
 
+
+        # ======================================
+        # Day-2 Database Fix
+        # ======================================
+
         command:
+
         - /bin/sh
         - -c
         - |
+
           set -e
 
-          echo "Connecting to SonarQube PostgreSQL database..."
+          echo "========================================"
+          echo "SonarQube Database Fixer"
+          echo "========================================"
+
+          echo ""
+          echo "Testing PostgreSQL connection..."
 
           psql \
             -v ON_ERROR_STOP=1 \
-            -c "UPDATE settings SET value='true' WHERE key='sonar.forceAuthentication';"
+            -c "SELECT current_database(), current_user;"
 
+          echo ""
+          echo "Checking SonarQube database schema..."
+
+          HAS_SETTINGS=$(psql \
+            -tAc "SELECT to_regclass('public.settings') IS NOT NULL;")
+
+          HAS_PROPERTIES=$(psql \
+            -tAc "SELECT to_regclass('public.properties') IS NOT NULL;")
+
+
+          # ====================================
+          # SQL supplied by challenge
+          # ====================================
+
+          if [ "$HAS_SETTINGS" = "t" ]; then
+
+            echo "Found settings table."
+            echo "Executing SQL supplied by challenge..."
+
+            psql \
+              -v ON_ERROR_STOP=1 \
+              -c "UPDATE settings
+                  SET value='true'
+                  WHERE key='sonar.forceAuthentication';"
+
+
+          # ====================================
+          # Current SonarQube schema
+          # ====================================
+
+          elif [ "$HAS_PROPERTIES" = "t" ]; then
+
+            echo "The supplied 'settings' table does not exist."
+            echo "Detected current SonarQube properties schema."
+            echo "Executing schema-equivalent update..."
+
+            psql \
+              -v ON_ERROR_STOP=1 \
+              -c "UPDATE properties
+                  SET text_value='true'
+                  WHERE prop_key='sonar.forceAuthentication';"
+
+            echo ""
+            echo "Verifying property..."
+
+            psql \
+              -v ON_ERROR_STOP=1 \
+              -c "SELECT prop_key, text_value
+                  FROM properties
+                  WHERE prop_key='sonar.forceAuthentication';"
+
+          else
+
+            echo "ERROR: Neither settings nor properties table exists."
+            echo "Unable to identify SonarQube configuration schema."
+
+            exit 1
+
+          fi
+
+
+          echo ""
+          echo "========================================"
           echo "Database update completed successfully."
+          echo "========================================"
