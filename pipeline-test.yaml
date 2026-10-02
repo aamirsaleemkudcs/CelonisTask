@@ -1,0 +1,225 @@
+trigger: none
+pr: none
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+- group: AWS
+
+stages:
+
+- stage: ApplicationTest
+  displayName: "SonarQube Application Test"
+
+  jobs:
+
+  - job: TestSonarQube
+    displayName: "Test SonarQube"
+
+    steps:
+
+    # ==========================================
+    # Checkout
+    # ==========================================
+    - checkout: self
+
+
+    # ==========================================
+    # Test AWS Connection
+    # ==========================================
+    - script: |
+        echo "Testing AWS connection..."
+        aws sts get-caller-identity
+      displayName: "Test AWS Connection"
+      env:
+        AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+        AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+        AWS_DEFAULT_REGION: $(AWS_REGION)
+
+
+    # ==========================================
+    # Install kubectl
+    # ==========================================
+    - task: KubectlInstaller@0
+      displayName: "Install kubectl"
+      inputs:
+        kubectlVersion: 'latest'
+
+
+    # ==========================================
+    # Connect to EKS
+    # ==========================================
+    - script: |
+        set -e
+
+        echo "Configuring EKS connection..."
+
+        aws eks update-kubeconfig \
+          --region us-east-2 \
+          --name celonis-eks-dev
+
+        echo ""
+        echo "Current Kubernetes context:"
+        kubectl config current-context
+
+        echo ""
+        echo "EKS nodes:"
+        kubectl get nodes -o wide
+      displayName: "Connect to EKS"
+      env:
+        AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+        AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+        AWS_DEFAULT_REGION: $(AWS_REGION)
+
+
+    # ==========================================
+    # Check SonarQube Kubernetes Resources
+    # ==========================================
+    - script: |
+        set -e
+
+        echo "========================================"
+        echo "SonarQube Pods"
+        echo "========================================"
+
+        kubectl get pods \
+          -n sonarqube \
+          -o wide
+
+        echo ""
+        echo "========================================"
+        echo "SonarQube Services"
+        echo "========================================"
+
+        kubectl get services \
+          -n sonarqube
+
+        echo ""
+        echo "========================================"
+        echo "Waiting for SonarQube Pod"
+        echo "========================================"
+
+        kubectl wait \
+          --for=condition=Ready \
+          pod \
+          --all \
+          -n sonarqube \
+          --timeout=300s
+
+      displayName: "Check SonarQube Resources"
+
+
+    # ==========================================
+    # SonarQube Application Health Test
+    # ==========================================
+    - script: |
+        set -e
+
+        echo "========================================"
+        echo "Finding SonarQube Service"
+        echo "========================================"
+
+        SERVICE=$(kubectl get svc \
+          -n sonarqube \
+          -o json | \
+          jq -r '.items[] |
+          select(any(.spec.ports[]?; .port == 9000)) |
+          .metadata.name' | head -n 1)
+
+        if [ -z "$SERVICE" ]; then
+          echo "ERROR: No SonarQube service found on port 9000."
+          exit 1
+        fi
+
+        echo "SonarQube service: $SERVICE"
+
+        echo ""
+        echo "Service endpoints:"
+        kubectl get endpoints \
+          "$SERVICE" \
+          -n sonarqube
+
+        echo ""
+        echo "========================================"
+        echo "Starting temporary port-forward"
+        echo "========================================"
+
+        kubectl port-forward \
+          -n sonarqube \
+          "svc/$SERVICE" \
+          9000:9000 \
+          > /tmp/sonarqube-portforward.log 2>&1 &
+
+        PF_PID=$!
+
+        trap 'kill $PF_PID 2>/dev/null || true' EXIT
+
+        sleep 5
+
+        echo ""
+        echo "========================================"
+        echo "Testing SonarQube API"
+        echo "========================================"
+
+        for i in {1..30}; do
+
+          STATUS=$(curl \
+            --silent \
+            --max-time 10 \
+            http://127.0.0.1:9000/api/system/status \
+            || true)
+
+          echo "Attempt $i: $STATUS"
+
+          if echo "$STATUS" | grep -q '"status":"UP"'; then
+
+            echo ""
+            echo "========================================"
+            echo "TEST PASSED"
+            echo "========================================"
+            echo ""
+            echo "SonarQube application is UP."
+            echo "SonarQube API is responding."
+            echo "EKS service connectivity is working."
+            echo ""
+
+            exit 0
+          fi
+
+          sleep 10
+
+        done
+
+
+        echo ""
+        echo "========================================"
+        echo "TEST FAILED"
+        echo "========================================"
+
+        echo ""
+        echo "Port-forward log:"
+        cat /tmp/sonarqube-portforward.log || true
+
+        echo ""
+        echo "Pod status:"
+        kubectl get pods \
+          -n sonarqube \
+          -o wide || true
+
+        echo ""
+        echo "Recent SonarQube logs:"
+
+        POD=$(kubectl get pods \
+          -n sonarqube \
+          -o jsonpath='{.items[0].metadata.name}')
+
+        kubectl logs \
+          -n sonarqube \
+          "$POD" \
+          --all-containers=true \
+          --tail=100 || true
+
+        exit 1
+
+      displayName: "Test SonarQube Application"
