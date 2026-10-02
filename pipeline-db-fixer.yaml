@@ -1,0 +1,137 @@
+trigger: none
+pr: none
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+- group: AWS
+
+stages:
+
+- stage: DatabaseFix
+  displayName: "SonarQube Database Fix"
+
+  jobs:
+
+  - job: RunDatabaseFix
+    displayName: "Run SonarQube DB Fixer"
+
+    steps:
+
+    - checkout: self
+
+    # ==========================================
+    # Install kubectl
+    # ==========================================
+    - task: KubectlInstaller@0
+      displayName: "Install kubectl"
+      inputs:
+        kubectlVersion: 'latest'
+
+
+    # ==========================================
+    # Connect to EKS
+    # ==========================================
+    - script: |
+        set -e
+
+        echo "Connecting to EKS..."
+
+        aws eks update-kubeconfig \
+          --region us-east-2 \
+          --name celonis-eks-dev
+
+        kubectl get nodes
+
+      displayName: "Connect to EKS"
+
+      env:
+        AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+        AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+        AWS_DEFAULT_REGION: $(AWS_REGION)
+
+
+    # ==========================================
+    # Check prerequisites
+    # ==========================================
+    - script: |
+        set -e
+
+        echo "Checking SonarQube namespace..."
+        kubectl get namespace sonarqube
+
+        echo "Checking database Secret..."
+        kubectl get secret sonarqube-jdbc \
+          -n sonarqube
+
+        echo "Checking database ConfigMap..."
+        kubectl get configmap sonarqube-db-config \
+          -n sonarqube
+
+      displayName: "Check DB Fixer Prerequisites"
+
+
+    # ==========================================
+    # Remove previous Job
+    # ==========================================
+    - script: |
+        kubectl delete job sonarqube-db-fixer \
+          -n sonarqube \
+          --ignore-not-found=true
+
+      displayName: "Remove Previous DB Fixer Job"
+
+
+    # ==========================================
+    # Run Fixer Job
+    # ==========================================
+    - script: |
+        set -e
+
+        echo "Deploying database fixer..."
+
+        kubectl apply \
+          -f kubernetes/db-fixer-job.yaml
+
+        echo "Waiting for database operation..."
+
+        kubectl wait \
+          --for=condition=complete \
+          job/sonarqube-db-fixer \
+          -n sonarqube \
+          --timeout=300s
+
+      displayName: "Run DB Fixer"
+
+
+    # ==========================================
+    # Show Results
+    # ==========================================
+    - script: |
+        echo "========================================"
+        echo "DB FIXER JOB"
+        echo "========================================"
+
+        kubectl get job sonarqube-db-fixer \
+          -n sonarqube
+
+        echo ""
+        echo "========================================"
+        echo "JOB POD"
+        echo "========================================"
+
+        kubectl get pods \
+          -n sonarqube \
+          -l job-name=sonarqube-db-fixer
+
+        echo ""
+        echo "========================================"
+        echo "JOB LOGS"
+        echo "========================================"
+
+        kubectl logs \
+          -n sonarqube \
+          job/sonarqube-db-fixer
+
+      displayName: "Verify Database Fix"
