@@ -1,0 +1,79 @@
+apiVersion: batch/v1
+kind: Job
+
+metadata:
+  name: sonarqube-db-fixer
+  namespace: sonarqube
+  labels:
+    app: sonarqube
+    component: db-fixer
+
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 300
+
+  template:
+    metadata:
+      labels:
+        app: sonarqube
+        component: db-fixer
+
+    spec:
+      restartPolicy: Never
+
+      containers:
+
+      - name: db-fixer
+
+        image: postgres:16-alpine
+
+        env:
+
+        # Non-sensitive database configuration
+        - name: PGHOST
+          valueFrom:
+            configMapKeyRef:
+              name: sonarqube-db-config
+              key: host
+
+        - name: PGPORT
+          valueFrom:
+            configMapKeyRef:
+              name: sonarqube-db-config
+              key: port
+
+        - name: PGDATABASE
+          valueFrom:
+            configMapKeyRef:
+              name: sonarqube-db-config
+              key: database
+
+        # Credentials come from Kubernetes Secret
+        - name: PGUSER
+          valueFrom:
+            secretKeyRef:
+              name: sonarqube-jdbc
+              key: jdbc-username
+
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: sonarqube-jdbc
+              key: jdbc-password
+
+        - name: PGSSLMODE
+          value: "require"
+
+        command:
+        - /bin/sh
+        - -c
+        - |
+          set -e
+
+          echo "Connecting to SonarQube PostgreSQL database..."
+
+          psql \
+            -v ON_ERROR_STOP=1 \
+            -c "UPDATE settings SET value='true' WHERE key='sonar.forceAuthentication';"
+
+          echo "Database update completed successfully."
