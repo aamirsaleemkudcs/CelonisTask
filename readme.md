@@ -68,4 +68,4 @@ the update, and terminate with status Completed.
 running cluster on the fly to test your Helm/K8s agility.
 Submission Guidelines
 Please zip your Terraform and Kubernetes files into a secure archive and share it with
-us prior to the interview.
+us prior to the interview. 
