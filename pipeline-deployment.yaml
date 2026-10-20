@@ -193,6 +193,40 @@ stages:
 
 
     # ==========================================
+    # 9. Review Infrastructure Terraform Plan (NO APPLY)
+    # ==========================================
+    - bash: |
+        set -euo pipefail
+
+        echo "Inspecting EKS and RDS state ownership..."
+        terraform state list | grep -E 'module\.eks|module\.rds' || true
+
+        echo "Running read-only infrastructure plan..."
+        PLAN_FILE="$(Agent.TempDirectory)/infra-check.tfplan"
+        terraform plan -input=false -no-color -out="$PLAN_FILE"
+
+        echo "Resource changes and output actions (no values):"
+        terraform show -json "$PLAN_FILE" | jq '{
+          resource_changes: [
+            .resource_changes[]? |
+            select(.change.actions != ["no-op"]) |
+            {address: .address, actions: .change.actions}
+          ],
+          output_changes: (
+            .output_changes // {} |
+            with_entries(.value = {actions: .value.change.actions})
+          )
+        }'
+
+        echo "Infrastructure plan inspection complete. No changes applied."
+      workingDirectory: "$(TF_ROOT)"
+      displayName: "Review Infrastructure Terraform Plan (No Apply)"
+      env:
+        AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+        AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+        AWS_DEFAULT_REGION: $(AWS_REGION)
+
+    # ==========================================
     # 9. Diagnose and Validate Infrastructure Outputs
     # ==========================================
     - bash: |
