@@ -127,52 +127,11 @@ stages:
         AWS_DEFAULT_REGION: $(AWS_REGION)
 
 
-    ################
-
-    - bash: |
-        set -euo pipefail
-
-        echo "Terraform working directory:"
-        pwd
-
-        echo "Terraform workspace:"
-        terraform workspace show
-
-        echo "Saved Terraform output names:"
-        terraform output -json | jq -r 'keys[]'
-
-        echo "Checking RDS database resources in state:"
-        terraform state list | grep -E \
-          'module\.rds.*aws_db_instance|module\.rds.*aws_rds_cluster' \
-          || true
-
-        echo "Checking EKS cluster resources in state:"
-        terraform state list | grep -E \
-          'module\.eks.*aws_eks_cluster' \
-          || true
-
-        echo "Checking AWS RDS instances:"
-        aws rds describe-db-instances \
-          --region "$AWS_DEFAULT_REGION" \
-          --query 'DBInstances[].{Identifier:DBInstanceIdentifier,Status:DBInstanceStatus}' \
-          --output table
-
-      workingDirectory: "$(Build.SourcesDirectory)"
-      displayName: "Diagnose RDS Secret Output"
-      env:
-        AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
-        AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
-        AWS_DEFAULT_REGION: $(AWS_REGION)
-    ################
-
-
-
     # ==========================================
     # Create SonarQube Kubernetes Secrets
     # ==========================================
-    - bash: |
-        set -euo pipefail
-        set +x
+    - script: |
+        set -e
 
         echo "Creating SonarQube namespace..."
 
@@ -180,91 +139,41 @@ stages:
           --dry-run=client \
           -o yaml | kubectl apply -f -
 
-        echo "Checking Terraform state output..."
+        echo "Retrieving RDS secret ARN..."
 
-        if ! RDS_SECRET_ARN="$(terraform output -raw rds_master_secret_arn)"; then
-          echo "ERROR: Cannot read rds_master_secret_arn."
-          echo "Check Terraform backend, workspace and saved outputs."
-          exit 1
-        fi
+        RDS_SECRET_ARN=$(terraform output -raw rds_master_secret_arn)
 
-        if [[ ! "$RDS_SECRET_ARN" =~ ^arn:aws:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:.+ ]]; then
-          echo "ERROR: Terraform did not return a valid Secrets Manager ARN."
-          exit 1
-        fi
+        echo "Retrieving RDS password from Secrets Manager..."
 
-        echo "RDS secret ARN validated."
-
-        echo "Retrieving RDS credentials..."
-
-        SECRET_JSON="$(aws secretsmanager get-secret-value \
+        DB_PASSWORD=$(aws secretsmanager get-secret-value \
           --secret-id "$RDS_SECRET_ARN" \
-          --region "$AWS_DEFAULT_REGION" \
           --query SecretString \
-          --output text)"
+          --output text | jq -r '.password')
 
-        if ! DB_PASSWORD="$(printf '%s' "$SECRET_JSON" | jq -er '.password | select(type == "string" and length > 0)')"; then
-          echo "ERROR: RDS password missing from secret."
+        if [ -z "$DB_PASSWORD" ] || [ "$DB_PASSWORD" = "null" ]; then
+          echo "ERROR: Failed to retrieve RDS password."
           exit 1
         fi
 
-        unset SECRET_JSON
+        echo "Creating JDBC Kubernetes Secret..."
 
-        if [[ -z "${SONAR_MONITORING_PASSCODE:-}" ]]; then
-          echo "ERROR: SONAR_MONITORING_PASSCODE is missing."
-          exit 1
-        fi
-
-        echo "Creating/updating SonarQube secrets..."
-
-        create_or_replace_secret() {
-          local name="$1"
-          local key="$2"
-          local value="$3"
-          local manifest
-          local version
-
-          manifest="$(mktemp)"
-          chmod 600 "$manifest"
-
-          kubectl create secret generic "$name" \
-            -n sonarqube \
-            --from-literal="$key=$value" \
-            --dry-run=client \
-            -o json > "$manifest"
-
-          if version="$(kubectl get secret "$name" \
-            -n sonarqube \
-            -o jsonpath='{.metadata.resourceVersion}' 2>/dev/null)"; then
-
-            jq --arg rv "$version" \
-              '.metadata.resourceVersion = $rv' \
-              "$manifest" > "${manifest}.new"
-
-            mv "${manifest}.new" "$manifest"
-            kubectl replace -f "$manifest"
-          else
-            kubectl create -f "$manifest"
-          fi
-
-          rm -f "$manifest"
-        }
-
-        create_or_replace_secret \
-          "sonarqube-jdbc" \
-          "jdbc-password" \
-          "$DB_PASSWORD"
+        kubectl create secret generic sonarqube-jdbc \
+          --namespace sonarqube \
+          --from-literal=jdbc-password="$DB_PASSWORD" \
+          --dry-run=client \
+          -o yaml | kubectl apply -f -
 
         unset DB_PASSWORD
 
-        create_or_replace_secret \
-          "sonarqube-monitoring" \
-          "monitoring-passcode" \
-          "$SONAR_MONITORING_PASSCODE"
+        echo "Creating monitoring Kubernetes Secret..."
 
-        echo "SonarQube secrets created successfully."
+        kubectl create secret generic sonarqube-monitoring \
+          --namespace sonarqube \
+          --from-literal=monitoring-passcode="$SONAR_MONITORING_PASSCODE" \
+          --dry-run=client \
+          -o yaml | kubectl apply -f -
 
-      workingDirectory: "$(Build.SourcesDirectory)"
+        echo "SonarQube secrets successfully created."
       displayName: "Create SonarQube Secrets"
       env:
         AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
