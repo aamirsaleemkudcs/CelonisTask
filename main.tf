@@ -9,7 +9,6 @@ module "s3_dev" {
   environment = "dev"
 }
 
-/*
 # ==================================
 # VPC Module
 # ==================================
@@ -86,5 +85,3 @@ module "rds" {
 
   multi_az = false
 }
-
-*/

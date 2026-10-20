@@ -1,4 +1,4 @@
-/*
+
 output "eks_cluster_name" {
   description = "EKS cluster name"
   value       = module.eks.cluster_name
@@ -32,4 +32,4 @@ output "rds_db_name" {
 output "rds_master_secret_arn" {
   description = "Secrets Manager ARN containing the RDS master credentials"
   value       = module.rds.master_secret_arn
-}*/
+}
