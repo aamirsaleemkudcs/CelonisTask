@@ -8,7 +8,7 @@ module "s3_dev" {
   bucket_name = "celonis-tfstate-dev"
   environment = "dev"
 }
-
+/*
 # ==================================
 # VPC Module
 # ==================================
@@ -84,4 +84,4 @@ module "rds" {
   db_username = "sonaradmin"
 
   multi_az = false
-}
+}*/
