@@ -160,6 +160,46 @@ stages:
         AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
         AWS_DEFAULT_REGION: $(AWS_REGION)
 
+
+    - bash: |
+        set -euo pipefail
+
+        echo "Checking Terraform backend..."
+
+        terraform init -input=false -reconfigure
+
+        echo "Terraform workspace:"
+        terraform workspace show
+
+        echo "Resources recorded in state:"
+        terraform state list
+
+        echo "Total resources:"
+        terraform state list | wc -l
+
+        echo "Checking EKS cluster in AWS:"
+        aws eks describe-cluster \
+          --name celonis-eks-dev \
+          --region us-east-2 \
+          --query 'cluster.{Name:name,Status:status}' \
+          --output table
+
+        echo "Checking S3 state object:"
+        aws s3api head-object \
+          --bucket celonis-tfstate-2026 \
+          --key dev/terraform.tfstate \
+          --region us-east-2 \
+          --query '{Size:ContentLength,Modified:LastModified}' \
+          --output json
+
+      workingDirectory: "$(TF_ROOT)"
+      displayName: "Check Existing Infrastructure State"
+      env:
+        AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+        AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+        AWS_DEFAULT_REGION: $(AWS_REGION)
+
+
     # ==========================================
     # 9. Diagnose and Validate Infrastructure Outputs
     # ==========================================
