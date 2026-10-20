@@ -9,7 +9,7 @@ module "s3_dev" {
   environment = "dev"
 }
 
-/*
+
 # ==================================
 # VPC Module
 # ==================================
@@ -85,4 +85,4 @@ module "rds" {
   db_username = "sonaradmin"
 
   multi_az = false
-}*/
+}

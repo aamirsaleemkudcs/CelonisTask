@@ -127,11 +127,11 @@ stages:
         AWS_DEFAULT_REGION: $(AWS_REGION)
 
 
-    # ==========================================
-    # Create SonarQube Kubernetes Secrets
-    # ==========================================
+ # ==========================================
+# Create SonarQube Kubernetes Secrets
+# ==========================================
     - script: |
-        set -e
+        set -euo pipefail
 
         echo "Creating SonarQube namespace..."
 
@@ -141,17 +141,35 @@ stages:
 
         echo "Retrieving RDS secret ARN..."
 
-        RDS_SECRET_ARN=$(terraform output -raw rds_master_secret_arn)
+        RDS_SECRET_ARN="$(terraform output -raw rds_master_secret_arn)"
+        RDS_SECRET_ARN="$(printf '%s' "$RDS_SECRET_ARN" | tr -d '\r\n')"
+
+        if [[ -z "$RDS_SECRET_ARN" || "$RDS_SECRET_ARN" == "null" ]]; then
+          echo "ERROR: Terraform returned an empty RDS secret ARN."
+          exit 1
+        fi
+
+        if [[ ! "$RDS_SECRET_ARN" =~ ^arn:aws:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:[A-Za-z0-9/_+=.@!-]+$ ]]; then
+          echo "ERROR: Terraform output is not a valid Secrets Manager ARN."
+          exit 1
+        fi
 
         echo "Retrieving RDS password from Secrets Manager..."
 
-        DB_PASSWORD=$(aws secretsmanager get-secret-value \
+        if ! SECRET_JSON="$(aws secretsmanager get-secret-value \
           --secret-id "$RDS_SECRET_ARN" \
+          --region "$AWS_DEFAULT_REGION" \
           --query SecretString \
-          --output text | jq -r '.password')
+          --output text)"; then
+          echo "ERROR: Unable to retrieve RDS secret."
+          exit 1
+        fi
 
-        if [ -z "$DB_PASSWORD" ] || [ "$DB_PASSWORD" = "null" ]; then
-          echo "ERROR: Failed to retrieve RDS password."
+        DB_PASSWORD="$(printf '%s' "$SECRET_JSON" | jq -er '.password')"
+        unset SECRET_JSON
+
+        if [[ -z "$DB_PASSWORD" ]]; then
+          echo "ERROR: RDS password is empty."
           exit 1
         fi
 
@@ -167,6 +185,11 @@ stages:
 
         echo "Creating monitoring Kubernetes Secret..."
 
+        if [[ -z "${SONAR_MONITORING_PASSCODE:-}" ]]; then
+          echo "ERROR: Monitoring passcode is missing."
+          exit 1
+        fi
+
         kubectl create secret generic sonarqube-monitoring \
           --namespace sonarqube \
           --from-literal=monitoring-passcode="$SONAR_MONITORING_PASSCODE" \
@@ -174,7 +197,9 @@ stages:
           -o yaml | kubectl apply -f -
 
         echo "SonarQube secrets successfully created."
+
       displayName: "Create SonarQube Secrets"
+
       env:
         AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
         AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
