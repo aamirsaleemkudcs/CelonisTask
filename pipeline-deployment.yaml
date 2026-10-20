@@ -127,7 +127,46 @@ stages:
         AWS_DEFAULT_REGION: $(AWS_REGION)
 
 
-    
+    ################
+
+    - bash: |
+        set -euo pipefail
+
+        echo "Terraform working directory:"
+        pwd
+
+        echo "Terraform workspace:"
+        terraform workspace show
+
+        echo "Saved Terraform output names:"
+        terraform output -json | jq -r 'keys[]'
+
+        echo "Checking RDS database resources in state:"
+        terraform state list | grep -E \
+          'module\.rds.*aws_db_instance|module\.rds.*aws_rds_cluster' \
+          || true
+
+        echo "Checking EKS cluster resources in state:"
+        terraform state list | grep -E \
+          'module\.eks.*aws_eks_cluster' \
+          || true
+
+        echo "Checking AWS RDS instances:"
+        aws rds describe-db-instances \
+          --region "$AWS_DEFAULT_REGION" \
+          --query 'DBInstances[].{Identifier:DBInstanceIdentifier,Status:DBInstanceStatus}' \
+          --output table
+
+      workingDirectory: "$(Build.SourcesDirectory)"
+      displayName: "Diagnose RDS Secret Output"
+      env:
+        AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+        AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+        AWS_DEFAULT_REGION: $(AWS_REGION)
+    ################
+
+
+
     # ==========================================
     # Create SonarQube Kubernetes Secrets
     # ==========================================
