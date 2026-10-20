@@ -1,3 +1,4 @@
+
 trigger: none
 pr: none
 
@@ -8,152 +9,248 @@ variables:
 - group: AWS
 
 stages:
-
 - stage: ApplicationDeployment
   displayName: "SonarQube Application Deployment"
 
   jobs:
-
   - job: DeploySonarQube
     displayName: "Deploy SonarQube"
 
     steps:
 
     # ==========================================
-    # Checkout
+    # 1. Checkout
     # ==========================================
     - checkout: self
-
+      displayName: "Checkout Repository"
 
     # ==========================================
-    # Test AWS Connection
+    # 2. Detect Terraform Directories
     # ==========================================
-    - script: |
-        echo "Testing AWS connection..."
-        aws sts get-caller-identity
+    - bash: |
+        set -euo pipefail
+
+        echo "Checking repository structure..."
+
+        if [[ -f "$(Build.SourcesDirectory)/backend.tf" &&
+              -f "$(Build.SourcesDirectory)/main.tf" &&
+              -d "$(Build.SourcesDirectory)/application" ]]; then
+
+          ROOT="$(Build.SourcesDirectory)"
+
+        elif [[ -f "$(Build.SourcesDirectory)/CelonisTask/backend.tf" &&
+                -f "$(Build.SourcesDirectory)/CelonisTask/main.tf" &&
+                -d "$(Build.SourcesDirectory)/CelonisTask/application" ]]; then
+
+          ROOT="$(Build.SourcesDirectory)/CelonisTask"
+
+        else
+          echo "ERROR: Cannot locate CelonisTask Terraform files."
+          exit 1
+        fi
+
+        echo "Infrastructure directory: $ROOT"
+        echo "Application directory: $ROOT/application"
+
+        echo "##vso[task.setvariable variable=TF_ROOT]$ROOT"
+        echo "##vso[task.setvariable variable=APP_ROOT]$ROOT/application"
+
+      displayName: "Detect Terraform Directories"
+
+    # ==========================================
+    # 3. Verify AWS Authentication
+    # ==========================================
+    - bash: |
+        set -euo pipefail
+
+        echo "Testing AWS authentication..."
+
+        aws sts get-caller-identity \
+          --query '{Account:Account,Arn:Arn}' \
+          --output json
+
+        echo "AWS Region: $AWS_DEFAULT_REGION"
+
       displayName: "Test AWS Connection"
       env:
         AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
         AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
         AWS_DEFAULT_REGION: $(AWS_REGION)
 
-
     # ==========================================
-    # Install Terraform
+    # 4. Install Terraform
     # ==========================================
-    - script: |
-        echo "Installing Terraform..."
+    - bash: |
+        set -euo pipefail
 
-        wget -q https://releases.hashicorp.com/terraform/1.13.3/terraform_1.13.3_linux_amd64.zip
-        unzip -o terraform_1.13.3_linux_amd64.zip
-        sudo mv terraform /usr/local/bin/terraform
+        echo "Installing Terraform 1.13.3..."
+
+        curl -fsSLo terraform.zip \
+          https://releases.hashicorp.com/terraform/1.13.3/terraform_1.13.3_linux_amd64.zip
+
+        unzip -oq terraform.zip
+        sudo install -m 0755 terraform /usr/local/bin/terraform
+
+        rm -f terraform terraform.zip
 
         terraform version
-      displayName: "Install Terraform"
 
+      displayName: "Install Terraform"
+      workingDirectory: "$(Agent.TempDirectory)"
 
     # ==========================================
-    # Install kubectl
+    # 5. Install kubectl
     # ==========================================
     - task: KubectlInstaller@0
       displayName: "Install kubectl"
       inputs:
         kubectlVersion: 'latest'
 
-
     # ==========================================
-    # Install Helm
+    # 6. Install Helm
     # ==========================================
     - task: HelmInstaller@1
       displayName: "Install Helm"
       inputs:
         helmVersionToInstall: 'latest'
 
+    # ==========================================
+    # 7. Verify Deployment Tools
+    # ==========================================
+    - bash: |
+        set -euo pipefail
 
-    # ==========================================
-    # Verify Tools
-    # ==========================================
-    - script: |
         terraform version
         kubectl version --client
         helm version
+        jq --version
+
       displayName: "Verify Deployment Tools"
 
+    # ==========================================
+    # 8. Initialise Infrastructure State
+    # ==========================================
+    - bash: |
+        set -euo pipefail
+
+        echo "Initialising existing infrastructure state..."
+
+        terraform init -input=false -no-color
+
+        echo "Checking Terraform workspace..."
+        terraform workspace show
+
+        echo "Checking infrastructure state..."
+
+        RESOURCE_COUNT="$(terraform state list | wc -l)"
+
+        echo "Resources found: $RESOURCE_COUNT"
+
+        if [[ "$RESOURCE_COUNT" -eq 0 ]]; then
+          echo "ERROR: Infrastructure state has no resources."
+          echo "Check backend.tf, state key and workspace."
+          exit 1
+        fi
+
+        echo "Infrastructure state initialised successfully."
+
+      workingDirectory: "$(TF_ROOT)"
+      displayName: "Initialise Infrastructure State"
+      env:
+        AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+        AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+        AWS_DEFAULT_REGION: $(AWS_REGION)
 
     # ==========================================
-    # Connect to EKS
+    # 9. Validate Infrastructure Outputs
     # ==========================================
-    - script: |
+    - bash: |
+        set -euo pipefail
+
+        echo "Validating required Terraform outputs..."
+
+        for OUTPUT in \
+          eks_cluster_name \
+          rds_endpoint \
+          rds_master_secret_arn
+        do
+          if ! terraform output -json "$OUTPUT" >/dev/null 2>&1; then
+            echo "ERROR: Missing Terraform output: $OUTPUT"
+            echo "Check infrastructure outputs.tf and existing state."
+            exit 1
+          fi
+
+          echo "Output exists: $OUTPUT"
+        done
+
+        EKS_CLUSTER_NAME="$(terraform output -raw eks_cluster_name)"
+        RDS_ENDPOINT="$(terraform output -raw rds_endpoint)"
+        RDS_SECRET_ARN="$(terraform output -raw rds_master_secret_arn)"
+
+        if [[ -z "$EKS_CLUSTER_NAME" ||
+              "$EKS_CLUSTER_NAME" == "null" ]]; then
+          echo "ERROR: EKS cluster name is empty."
+          exit 1
+        fi
+
+        if [[ -z "$RDS_ENDPOINT" ||
+              "$RDS_ENDPOINT" == "null" ]]; then
+          echo "ERROR: RDS endpoint is empty."
+          exit 1
+        fi
+
+        if [[ ! "$RDS_SECRET_ARN" == arn:aws:secretsmanager:* ]]; then
+          echo "ERROR: RDS secret output is not a Secrets Manager ARN."
+          exit 1
+        fi
+
+        echo "EKS cluster: $EKS_CLUSTER_NAME"
+        echo "RDS endpoint output is populated."
+        echo "RDS Secrets Manager ARN is populated."
+
+        echo "##vso[task.setvariable variable=EKS_CLUSTER_NAME]$EKS_CLUSTER_NAME"
+
+      workingDirectory: "$(TF_ROOT)"
+      displayName: "Validate Infrastructure Outputs"
+      env:
+        AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+        AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+        AWS_DEFAULT_REGION: $(AWS_REGION)
+
+    # ==========================================
+    # 10. Connect to EKS
+    # ==========================================
+    - bash: |
+        set -euo pipefail
+
         echo "Configuring EKS kubeconfig..."
 
         aws eks update-kubeconfig \
-          --region us-east-2 \
-          --name celonis-eks-dev
+          --region "$AWS_DEFAULT_REGION" \
+          --name "$EKS_CLUSTER_NAME"
 
-        echo "Current context:"
+        echo "Current Kubernetes context:"
         kubectl config current-context
 
-        echo "EKS nodes:"
+        echo "Checking EKS nodes..."
         kubectl get nodes -o wide
 
-        echo "Kubernetes system pods:"
+        echo "Checking system pods..."
         kubectl get pods -n kube-system
+
       displayName: "Connect to EKS"
       env:
         AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
         AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
         AWS_DEFAULT_REGION: $(AWS_REGION)
+        EKS_CLUSTER_NAME: $(EKS_CLUSTER_NAME)
 
-
-# ==========================================
-# Read Infrastructure Terraform State
-# ==========================================
-    - script: |
+    # ==========================================
+    # 11. Create SonarQube Kubernetes Secrets
+    # ==========================================
+    - bash: |
         set -euo pipefail
-
-        echo "Initialising infrastructure state..."
-
-        terraform init -input=false
-
-        echo "Checking infrastructure outputs..."
-
-        terraform output -raw eks_cluster_name
-        terraform output -raw rds_endpoint
-
-        echo ""
-        echo "Checking RDS master secret ARN..."
-
-        RDS_SECRET_ARN="$(terraform output -raw rds_master_secret_arn)"
-
-        if [[ -z "$RDS_SECRET_ARN" ]]; then
-          echo "ERROR: RDS secret ARN is empty."
-          exit 1
-        fi
-
-        echo "ARN length: ${#RDS_SECRET_ARN}"
-
-        if [[ "$RDS_SECRET_ARN" == arn:aws:secretsmanager:* ]]; then
-          echo "SUCCESS: RDS secret output has Secrets Manager ARN prefix."
-        else
-          echo "ERROR: RDS secret output is not an ARN."
-          exit 1
-        fi
-
-        echo "Infrastructure state verification completed."
-
-      displayName: "Read Infrastructure State"
-
-      env:
-        AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
-        AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
-        AWS_DEFAULT_REGION: $(AWS_REGION)
-
-
- # ==========================================
-# Create SonarQube Kubernetes Secrets
-# ==========================================
-    - script: |
-        set -euo pipefail
+        set +x
 
         echo "Creating SonarQube namespace..."
 
@@ -164,153 +261,199 @@ stages:
         echo "Retrieving RDS secret ARN..."
 
         RDS_SECRET_ARN="$(terraform output -raw rds_master_secret_arn)"
-        RDS_SECRET_ARN="$(printf '%s' "$RDS_SECRET_ARN" | tr -d '\r\n')"
 
-        if [[ -z "$RDS_SECRET_ARN" || "$RDS_SECRET_ARN" == "null" ]]; then
-          echo "ERROR: Terraform returned an empty RDS secret ARN."
+        if [[ ! "$RDS_SECRET_ARN" == arn:aws:secretsmanager:* ]]; then
+          echo "ERROR: Invalid RDS Secrets Manager ARN."
           exit 1
         fi
 
-        if [[ ! "$RDS_SECRET_ARN" =~ ^arn:aws:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:[A-Za-z0-9/_+=.@!-]+$ ]]; then
-          echo "ERROR: Terraform output is not a valid Secrets Manager ARN."
-          exit 1
-        fi
+        echo "Retrieving RDS password..."
 
-        echo "Retrieving RDS password from Secrets Manager..."
-
-        if ! SECRET_JSON="$(aws secretsmanager get-secret-value \
+        SECRET_JSON="$(aws secretsmanager get-secret-value \
           --secret-id "$RDS_SECRET_ARN" \
           --region "$AWS_DEFAULT_REGION" \
           --query SecretString \
-          --output text)"; then
-          echo "ERROR: Unable to retrieve RDS secret."
+          --output text)"
+
+        if ! DB_PASSWORD="$(printf '%s' "$SECRET_JSON" | jq -er '.password | select(type == "string" and length > 0)')"; then
+          echo "ERROR: RDS secret has no valid password field."
           exit 1
         fi
 
-        DB_PASSWORD="$(printf '%s' "$SECRET_JSON" | jq -er '.password')"
         unset SECRET_JSON
 
-        if [[ -z "$DB_PASSWORD" ]]; then
-          echo "ERROR: RDS password is empty."
+        if [[ -z "${SONAR_MONITORING_PASSCODE:-}" ]]; then
+          echo "ERROR: SONAR_MONITORING_PASSCODE is missing."
           exit 1
         fi
 
-        echo "Creating JDBC Kubernetes Secret..."
+        echo "Creating/updating JDBC Kubernetes Secret..."
 
-        kubectl create secret generic sonarqube-jdbc \
-          --namespace sonarqube \
-          --from-literal=jdbc-password="$DB_PASSWORD" \
-          --dry-run=client \
-          -o yaml | kubectl apply -f -
+        # Use replace for existing secrets rather than client-side
+        # apply, avoiding plaintext values in apply annotations.
+        create_or_replace_secret() {
+          local SECRET_NAME="$1"
+          local SECRET_KEY="$2"
+          local SECRET_VALUE="$3"
+          local MANIFEST
+
+          MANIFEST="$(mktemp)"
+          chmod 600 "$MANIFEST"
+
+          kubectl create secret generic "$SECRET_NAME" \
+            --namespace sonarqube \
+            --from-literal="$SECRET_KEY=$SECRET_VALUE" \
+            --dry-run=client \
+            -o json > "$MANIFEST"
+
+          if kubectl get secret "$SECRET_NAME" \
+              -n sonarqube >/dev/null 2>&1; then
+
+            kubectl replace -f "$MANIFEST"
+          else
+            kubectl create -f "$MANIFEST"
+          fi
+
+          rm -f "$MANIFEST"
+        }
+
+        create_or_replace_secret \
+          "sonarqube-jdbc" \
+          "jdbc-password" \
+          "$DB_PASSWORD"
 
         unset DB_PASSWORD
 
-        echo "Creating monitoring Kubernetes Secret..."
+        echo "Creating/updating monitoring Kubernetes Secret..."
 
-        if [[ -z "${SONAR_MONITORING_PASSCODE:-}" ]]; then
-          echo "ERROR: Monitoring passcode is missing."
-          exit 1
-        fi
+        create_or_replace_secret \
+          "sonarqube-monitoring" \
+          "monitoring-passcode" \
+          "$SONAR_MONITORING_PASSCODE"
 
-        kubectl create secret generic sonarqube-monitoring \
-          --namespace sonarqube \
-          --from-literal=monitoring-passcode="$SONAR_MONITORING_PASSCODE" \
-          --dry-run=client \
-          -o yaml | kubectl apply -f -
+        echo "SonarQube Kubernetes secrets created successfully."
 
-        echo "SonarQube secrets successfully created."
-
+      workingDirectory: "$(TF_ROOT)"
       displayName: "Create SonarQube Secrets"
-
       env:
         AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
         AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
         AWS_DEFAULT_REGION: $(AWS_REGION)
         SONAR_MONITORING_PASSCODE: $(SONAR_MONITORING_PASSCODE)
 
+    # ==========================================
+    # 12. Application Terraform Init
+    # ==========================================
+    - bash: |
+        set -euo pipefail
 
-    # ==========================================
-    # Application Terraform Init
-    # ==========================================
-    - script: |
-        terraform init -input=false
-      workingDirectory: application
+        echo "Initialising SonarQube application Terraform..."
+
+        terraform init -input=false -no-color
+
+      workingDirectory: "$(APP_ROOT)"
       displayName: "Application Terraform Init"
       env:
         AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
         AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
         AWS_DEFAULT_REGION: $(AWS_REGION)
 
+    # ==========================================
+    # 13. Application Terraform Validate
+    # ==========================================
+    - bash: |
+        set -euo pipefail
 
-    # ==========================================
-    # Application Terraform Validate
-    # ==========================================
-    - script: |
-        terraform validate
-      workingDirectory: application
+        terraform validate -no-color
+
+      workingDirectory: "$(APP_ROOT)"
       displayName: "Application Terraform Validate"
 
+    # ==========================================
+    # 14. Application Terraform Plan
+    # ==========================================
+    - bash: |
+        set -euo pipefail
 
-    # ==========================================
-    # Application Terraform Plan
-    # ==========================================
-    - script: |
+        echo "Planning SonarQube deployment..."
+
         terraform plan \
           -input=false \
+          -no-color \
           -out=sonarqube.tfplan
-      workingDirectory: application
+
+      workingDirectory: "$(APP_ROOT)"
       displayName: "SonarQube Terraform Plan"
       env:
         AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
         AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
         AWS_DEFAULT_REGION: $(AWS_REGION)
 
+    # ==========================================
+    # 15. Deploy SonarQube
+    # ==========================================
+    - bash: |
+        set -euo pipefail
 
-    # ==========================================
-    # Deploy SonarQube
-    # ==========================================
-    - script: |
+        echo "Deploying SonarQube..."
+
         terraform apply \
           -input=false \
-          -auto-approve \
+          -no-color \
           sonarqube.tfplan
-      workingDirectory: application
+
+        echo "SonarQube Terraform deployment completed."
+
+      workingDirectory: "$(APP_ROOT)"
       displayName: "Deploy SonarQube with Helm"
       env:
         AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
         AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
         AWS_DEFAULT_REGION: $(AWS_REGION)
 
+    # ==========================================
+    # 16. Verify SonarQube Deployment
+    # ==========================================
+    - bash: |
+        set -euo pipefail
 
-    # ==========================================
-    # Verify SonarQube
-    # ==========================================
-    - script: |
         echo "========================================"
-        echo "Helm Release"
+        echo "Helm Releases"
         echo "========================================"
 
         helm list -n sonarqube
 
-        echo ""
         echo "========================================"
         echo "SonarQube Pods"
         echo "========================================"
 
         kubectl get pods -n sonarqube -o wide
 
-        echo ""
         echo "========================================"
         echo "SonarQube Services"
         echo "========================================"
 
         kubectl get services -n sonarqube
 
-        echo ""
         echo "========================================"
-        echo "SonarQube Pod Details"
+        echo "SonarQube Deployment Status"
         echo "========================================"
 
-        kubectl describe pods -n sonarqube
+        kubectl get statefulsets,deployments -n sonarqube
+
+        echo "========================================"
+        echo "SonarQube Kubernetes Secrets"
+        echo "========================================"
+
+        kubectl get secret \
+          sonarqube-jdbc \
+          sonarqube-monitoring \
+          -n sonarqube
+
+        echo "SonarQube deployment verification completed."
 
       displayName: "Verify SonarQube Deployment"
+      env:
+        AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+        AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+        AWS_DEFAULT_REGION: $(AWS_REGION)
