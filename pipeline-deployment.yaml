@@ -1,4 +1,3 @@
-
 trigger: none
 pr: none
 
@@ -162,56 +161,70 @@ stages:
         AWS_DEFAULT_REGION: $(AWS_REGION)
 
     # ==========================================
-    # 9. Validate Infrastructure Outputs
+    # 9. Diagnose and Validate Infrastructure Outputs
     # ==========================================
     - bash: |
         set -euo pipefail
 
-        echo "Validating required Terraform outputs..."
-
-        for OUTPUT in \
-          eks_cluster_name \
-          rds_endpoint \
-          rds_master_secret_arn
-        do
-          if ! terraform output -json "$OUTPUT" >/dev/null 2>&1; then
-            echo "ERROR: Missing Terraform output: $OUTPUT"
-            echo "Check infrastructure outputs.tf and existing state."
+        echo "Checking configured S3 Terraform state..."
+        aws s3api head-object \
+          --bucket celonis-tfstate-2026 \
+          --key dev/terraform.tfstate \
+          --region us-east-2 >/dev/null || {
+            echo "ERROR: Cannot access s3://celonis-tfstate-2026/dev/terraform.tfstate"
+            echo "Check state location and IAM permissions."
             exit 1
-          fi
+          }
 
-          echo "Output exists: $OUTPUT"
-        done
+        echo "Terraform working directory: $PWD"
+        echo "Terraform workspace: $(terraform workspace show)"
+        echo "Output declarations in configuration:"
+        grep -hE '^[[:space:]]*output[[:space:]]+"' ./*.tf | sed -E 's/.*output[[:space:]]+"([^"]+)".*/  - \1/' || true
 
-        EKS_CLUSTER_NAME="$(terraform output -raw eks_cluster_name)"
-        RDS_ENDPOINT="$(terraform output -raw rds_endpoint)"
-        RDS_SECRET_ARN="$(terraform output -raw rds_master_secret_arn)"
-
-        if [[ -z "$EKS_CLUSTER_NAME" ||
-              "$EKS_CLUSTER_NAME" == "null" ]]; then
-          echo "ERROR: EKS cluster name is empty."
+        echo "Output names saved in state:"
+        if ! OUTPUTS_JSON="$(terraform output -json)"; then
+          echo "ERROR: Unable to read Terraform state outputs."
           exit 1
         fi
+        printf '%s' "$OUTPUTS_JSON" | jq -r 'keys[] | "  - " + .' 
 
-        if [[ -z "$RDS_ENDPOINT" ||
-              "$RDS_ENDPOINT" == "null" ]]; then
+        for OUTPUT in eks_cluster_name rds_endpoint rds_master_secret_arn; do
+          if ! printf '%s' "$OUTPUTS_JSON" | jq -e --arg name "$OUTPUT" \
+            'has($name) and .[$name].value != null and .[$name].value != ""' >/dev/null; then
+            echo "ERROR: Missing or empty saved Terraform output: $OUTPUT"
+            echo "The output may be declared in outputs.tf but absent from this state."
+            echo "Verify this is the state used by pipeline-infrastructure.yaml."
+            echo "If the backend is correct, run a reviewed infrastructure plan/apply"
+            echo "to publish the outputs. Do NOT apply unexpected resource changes."
+            exit 1
+          fi
+          echo "Validated output: $OUTPUT"
+        done
+
+        EKS_CLUSTER_NAME="$(printf '%s' "$OUTPUTS_JSON" | jq -er '.eks_cluster_name.value | strings')"
+        RDS_ENDPOINT="$(printf '%s' "$OUTPUTS_JSON" | jq -er '.rds_endpoint.value | strings')"
+        RDS_SECRET_ARN="$(printf '%s' "$OUTPUTS_JSON" | jq -er '.rds_master_secret_arn.value | strings')"
+        unset OUTPUTS_JSON
+
+        if [[ ! "$EKS_CLUSTER_NAME" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*$ ]]; then
+          echo "ERROR: EKS cluster name is invalid."
+          exit 1
+        fi
+        if [[ -z "$RDS_ENDPOINT" ]]; then
           echo "ERROR: RDS endpoint is empty."
           exit 1
         fi
-
         if [[ ! "$RDS_SECRET_ARN" == arn:aws:secretsmanager:* ]]; then
           echo "ERROR: RDS secret output is not a Secrets Manager ARN."
           exit 1
         fi
 
         echo "EKS cluster: $EKS_CLUSTER_NAME"
-        echo "RDS endpoint output is populated."
-        echo "RDS Secrets Manager ARN is populated."
-
+        echo "RDS endpoint and secret ARN validated (values hidden)."
         echo "##vso[task.setvariable variable=EKS_CLUSTER_NAME]$EKS_CLUSTER_NAME"
 
       workingDirectory: "$(TF_ROOT)"
-      displayName: "Validate Infrastructure Outputs"
+      displayName: "Diagnose and Validate Infrastructure Outputs"
       env:
         AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
         AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
@@ -251,6 +264,8 @@ stages:
     - bash: |
         set -euo pipefail
         set +x
+        umask 077
+        trap 'unset DB_PASSWORD SECRET_JSON RDS_SECRET_ARN || true' EXIT
 
         echo "Creating SonarQube namespace..."
 
@@ -306,9 +321,11 @@ stages:
             --dry-run=client \
             -o json > "$MANIFEST"
 
-          if kubectl get secret "$SECRET_NAME" \
-              -n sonarqube >/dev/null 2>&1; then
-
+          if RESOURCE_VERSION="$(kubectl get secret "$SECRET_NAME" \
+              -n sonarqube -o jsonpath='{.metadata.resourceVersion}' 2>/dev/null)"; then
+            jq --arg rv "$RESOURCE_VERSION" \
+              '.metadata.resourceVersion = $rv' "$MANIFEST" > "${MANIFEST}.new"
+            mv "${MANIFEST}.new" "$MANIFEST"
             kubectl replace -f "$MANIFEST"
           else
             kubectl create -f "$MANIFEST"
