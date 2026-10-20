@@ -105,22 +105,44 @@ stages:
         AWS_DEFAULT_REGION: $(AWS_REGION)
 
 
-    # ==========================================
-    # Read Infrastructure Terraform State
-    # ==========================================
+# ==========================================
+# Read Infrastructure Terraform State
+# ==========================================
     - script: |
+        set -euo pipefail
+
         echo "Initialising infrastructure state..."
 
         terraform init -input=false
 
-        echo "Checking required infrastructure outputs..."
+        echo "Checking infrastructure outputs..."
 
         terraform output -raw eks_cluster_name
         terraform output -raw rds_endpoint
 
         echo ""
-        echo "Infrastructure state available."
+        echo "Checking RDS master secret ARN..."
+
+        RDS_SECRET_ARN="$(terraform output -raw rds_master_secret_arn)"
+
+        if [[ -z "$RDS_SECRET_ARN" ]]; then
+          echo "ERROR: RDS secret ARN is empty."
+          exit 1
+        fi
+
+        echo "ARN length: ${#RDS_SECRET_ARN}"
+
+        if [[ "$RDS_SECRET_ARN" == arn:aws:secretsmanager:* ]]; then
+          echo "SUCCESS: RDS secret output has Secrets Manager ARN prefix."
+        else
+          echo "ERROR: RDS secret output is not an ARN."
+          exit 1
+        fi
+
+        echo "Infrastructure state verification completed."
+
       displayName: "Read Infrastructure State"
+
       env:
         AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
         AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
